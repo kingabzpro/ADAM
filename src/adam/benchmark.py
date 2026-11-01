@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 
 import numpy as np
@@ -60,6 +61,33 @@ async def benchmark_d3(model, *, requests: int, concurrency: int = 1) -> dict:
     return result
 
 
+async def benchmark_tickers(coordinator, tickers, *, concurrency=1):
+    """Measure end-to-end coordinator latency, counting partial failures as failures."""
+    from adam.risk import RiskEvidence
+
+    if (not isinstance(tickers, (list, tuple)) or not tickers
+            or any(not isinstance(ticker, str) or not re.fullmatch(r'[A-Z0-9.^=\-]{1,20}', ticker.strip().upper()) for ticker in tickers)):
+        raise ValueError('Valid ticker symbols are required')
+    symbols = [ticker.strip().upper() for ticker in tickers]
+    if len(set(symbols)) != len(symbols):
+        raise ValueError('Ticker symbols must be unique')
+    statuses = {}
+
+    async def operation(index):
+        ticker = symbols[index]
+        result = await coordinator.analyze(ticker, RiskEvidence())
+        statuses[ticker] = result.agents
+        if (result.errors or any(result.agents.get(name) != 'completed'
+                                 for name in ('market', 'technical', 'fundamentals'))):
+            raise RuntimeError(str(result.errors or 'Required agent did not complete'))
+
+    result = await benchmark(operation, requests=len(symbols), concurrency=concurrency)
+    for failure in result['failures']:
+        failure['ticker'] = symbols[failure['index']]
+    result.update(tickers=symbols, agent_statuses=statuses)
+    return result
+
+
 def main():
     import argparse
     import json
@@ -71,11 +99,16 @@ def main():
     parser = argparse.ArgumentParser(description='Measure local D3 inference latency and model memory.')
     parser.add_argument('--requests', type=int, default=10)
     parser.add_argument('--concurrency', type=int, default=1)
+    parser.add_argument('--tickers', help='Comma-separated tickers for a live market/technical/fundamentals workload')
     args = parser.parse_args()
 
     async def run():
         async with httpx.AsyncClient(timeout=180, trust_env=False) as client:
-            return await benchmark_d3(D3Client(client), requests=args.requests, concurrency=args.concurrency)
+            model = D3Client(client)
+            if args.tickers is not None:
+                from adam.coordinator import Coordinator
+                return await benchmark_tickers(Coordinator(model, None), args.tickers.split(','), concurrency=args.concurrency)
+            return await benchmark_d3(model, requests=args.requests, concurrency=args.concurrency)
 
     try:
         result = asyncio.run(run())

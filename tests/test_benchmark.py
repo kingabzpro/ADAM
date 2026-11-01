@@ -5,6 +5,39 @@ from adam.benchmark import benchmark
 
 
 class BenchmarkTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ticker_benchmark_limits_workers_and_reports_partial_results(self):
+        from types import SimpleNamespace
+        from adam.benchmark import benchmark_tickers
+        active = maximum = 0
+        class Coordinator:
+            async def analyze(self, ticker, evidence):
+                nonlocal active, maximum
+                active += 1
+                maximum = max(maximum, active)
+                await asyncio.sleep(.01)
+                active -= 1
+                return SimpleNamespace(agents={'market': 'failed' if ticker == 'BAD' else 'completed',
+                                               'technical': 'completed', 'fundamentals': 'completed'},
+                                       errors={'market': 'unavailable'} if ticker == 'BAD' else {})
+        result = await benchmark_tickers(Coordinator(), ['AAPL', 'BAD', 'MSFT'], concurrency=2)
+        self.assertEqual(maximum, 2)
+        self.assertEqual((result['succeeded'], result['failed']), (2, 1))
+        self.assertEqual(result['failures'][0]['ticker'], 'BAD')
+        self.assertEqual(result['requests'], 3)
+        with self.assertRaises(ValueError):
+            await benchmark_tickers(Coordinator(), ['AAPL', 'aapl'], concurrency=2)
+
+    async def test_ticker_benchmark_handles_dozens_of_requests(self):
+        from types import SimpleNamespace
+        from adam.benchmark import benchmark_tickers
+        class Coordinator:
+            async def analyze(self, ticker, evidence):
+                await asyncio.sleep(0)
+                return SimpleNamespace(agents={'market': 'completed', 'technical': 'completed', 'fundamentals': 'completed'}, errors={})
+        result = await benchmark_tickers(Coordinator(), [f'T{i}' for i in range(30)], concurrency=4)
+        self.assertEqual(result['succeeded'], 30)
+        self.assertEqual(len(result['agent_statuses']), 30)
+
     async def test_limits_concurrency_and_reports_failures(self):
         active = maximum = 0
         async def operation(index):

@@ -646,6 +646,7 @@ adam/
 - [ ] Add request deduplication.
 - [ ] Measure p50/p95/p99 decision latency.
 - [ ] Test concurrent workloads across multiple tickers.
+  - Added a bounded live coordinator benchmark; a four-ticker run succeeded with market, technical, and fundamentals agents. Larger live workloads and forecast/news coverage remain to be measured.
 
 ### Phase 6 — Evaluation
 
