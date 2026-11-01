@@ -38,6 +38,20 @@ For simulated single-ticker tracking and saved-Buy outcome evaluation, see [pape
 
 Model inference runs locally; market data, news searches, setup, and model downloads use the internet. News uses a [limited article source](docs/news.md) and falls back to headlines; results may be unrelated to the ticker. FinBERT weights are [CC BY-NC-SA 4.0](https://huggingface.co/ProsusAI/finbert); review their terms before use.
 
+## Backtest results
+
+`uv run adam-backtest` replays the four-agent consensus on point-in-time windows and trades long/flat at the next week's open. First study: top 25 S&P 500 mega caps, January to June 2026, 5 bps per trade ([full report](docs/backtest-2026H1.md)).
+
+| Strategy | Total return | Sharpe | Max drawdown |
+|---|---|---|---|
+| ADAM weekly consensus | -0.8% | -0.19 | 5.0% |
+| Buy and hold | +13.6% | 1.50 | 7.4% |
+| SMA-20 rule | -1.5% | -0.35 | 3.8% |
+
+- The consensus is a directional probability vote, so HOLD weeks dropped from 81% to 19%; a margin sweep in the report shows the decisiveness trade-off.
+- Directional accuracy is near coin-flip at a weekly horizon (BUY ~54%, SELL ~46%), and in this window the decisive mode lost money while an extreme-selective variant made +2.0%. Treat this as a measurement of the current agents, not an edge.
+- Known biases: fundamentals are current-day data applied to the past (lookahead), no historical news is replayed, and the universe is today's top 25 (survivorship).
+
 ## Development
 
 ```bash
