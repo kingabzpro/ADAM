@@ -22,6 +22,7 @@ adam = "adam:main"
 adam-setup = "adam.setup:main"
 adam-benchmark = "adam.benchmark:main"
 adam-calibrate = "adam.calibration:main"
+adam-paper = "adam.paper:main"
 
 [project.optional-dependencies]
 forecast = [

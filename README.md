@@ -29,6 +29,8 @@ For platform requirements and troubleshooting, see the [installation guide](docs
 
 Online analyses save local data snapshots for [offline research](docs/offline.md). Offline results always show **No Trade**.
 
+For simulated single-ticker tracking, see [paper trading](docs/paper.md).
+
 ## Built with
 
 - **Market data:** Yahoo Finance · **Forecasts:** Timestral · **Sentiment:** FinBERT
