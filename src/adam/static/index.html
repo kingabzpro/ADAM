@@ -634,7 +634,6 @@
       detail.appendChild(line);
     }
     (payload.news_links || []).forEach((item) => detail.appendChild(newsItem(item)));
-    const counts = payload.vote.counts;
     const vote = document.createElement('p');
     vote.className = 'muted';
     vote.textContent = 'Agents voted ' + counts.BUY + ' Buy, ' + counts.HOLD + ' Hold, ' + counts.SELL + ' Sell' +
