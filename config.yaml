@@ -1,1 +1,3 @@
 inference_concurrency: 1
+data_concurrency: 4
+ticker_concurrency: 4

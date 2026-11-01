@@ -603,6 +603,7 @@ adam/
 
 - [x] Initialize Python project with uv.
 - [ ] Set up application configuration.
+  - Built-in defaults and optional YAML configure ticker, data, and D3 concurrency; other configuration needs remain under review.
 - [ ] Create the startup supervisor.
 - [x] Build NiceGUI dashboard shell.
 - [x] Implement Yahoo Finance market collection.

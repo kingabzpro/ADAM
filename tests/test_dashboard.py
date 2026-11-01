@@ -17,6 +17,40 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(rows[2]["status"], "No price history")
 
 class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ticker_concurrency_limits_active_analyses(self):
+        import asyncio
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        active = maximum = 0
+        class Coordinator:
+            def __init__(self, *args, **kwargs):
+                pass
+            async def analyze(self, ticker, evidence, **kwargs):
+                nonlocal active, maximum
+                active += 1
+                maximum = max(maximum, active)
+                await asyncio.sleep(.01)
+                active -= 1
+                return SimpleNamespace(decisions={}, agents={}, evidence={}, errors={},
+                    risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)))
+        with patch('adam.dashboard.Coordinator', Coordinator):
+            await run_analysis(['AAPL', 'MSFT', 'NVDA'], 1, ticker_concurrency=2)
+        self.assertEqual(maximum, 2)
+
+    async def test_data_concurrency_is_passed_to_coordinator(self):
+        from unittest.mock import AsyncMock, patch
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, evidence={}, errors={},
+            risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)))
+        with patch('adam.dashboard.Coordinator', return_value=coordinator) as factory:
+            await run_analysis(['AAPL'], 1, data_concurrency=2, ticker_concurrency=3)
+        self.assertEqual(factory.call_args.kwargs['data_concurrency'], 2)
+
     async def test_history_outcomes_use_ticker_history(self):
         from unittest.mock import patch, sentinel
         from adam.dashboard import saved_buy_report

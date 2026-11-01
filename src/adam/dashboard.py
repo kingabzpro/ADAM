@@ -72,7 +72,9 @@ def format_agent(name, status, decision):
     return f"{name}: {decision.signal} ({scores}){label}"
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None) -> list[dict]:
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None, data_concurrency=4, ticker_concurrency=4) -> list[dict]:
+    if type(ticker_concurrency) is not int or ticker_concurrency < 1:
+        raise ValueError('ticker_concurrency must be a positive integer')
     async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
         forecaster = await asyncio.to_thread(shared_forecaster) if forecast else None
         classifier = await asyncio.to_thread(shared_classifier) if news else None
@@ -83,8 +85,8 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
 
         coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster,
                                   news_provider=news_provider if news else None,
-                                  inference_concurrency=inference_concurrency)
-        ticker_slots = asyncio.Semaphore(4)
+                                  inference_concurrency=inference_concurrency, data_concurrency=data_concurrency)
+        ticker_slots = asyncio.Semaphore(ticker_concurrency)
 
         async def analyze(ticker):
             async with ticker_slots:
@@ -172,7 +174,7 @@ def dashboard(config) -> None:
 
         try:
             limits, evidence = parse_risk_input(risk_input.value or "")
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path)
+            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path, data_concurrency=config.data_concurrency, ticker_concurrency=config.ticker_concurrency)
             with evidence_details:
                 for row in analysis_table.rows:
                     with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):

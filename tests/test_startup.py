@@ -10,6 +10,28 @@ class StartupTests(unittest.TestCase):
         self.ollama_patch.start()
         self.addCleanup(self.ollama_patch.stop)
 
+    def test_starts_without_a_config_file(self):
+        import os
+        import tempfile
+        from adam.config import Config
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True), \
+             patch('adam.supervisor.run_dashboard') as run_dashboard:
+            old_directory = os.getcwd()
+            try:
+                os.chdir(directory)
+                main()
+            finally:
+                os.chdir(old_directory)
+        run_dashboard.assert_called_once_with(Config(inference_concurrency=1, data_concurrency=4, ticker_concurrency=4))
+
+    def test_explicit_missing_config_is_an_error(self):
+        import os
+        with patch.dict(os.environ, {'ADAM_CONFIG': 'missing-config-test.yaml'}), \
+             patch('adam.supervisor.run_dashboard') as run_dashboard:
+            with self.assertRaises(FileNotFoundError):
+                main()
+        run_dashboard.assert_not_called()
+
     @patch("adam.supervisor.run_dashboard")
     @patch("adam.supervisor.load_config")
     def test_startup_loads_configuration_before_dashboard(self, load_config, run_dashboard):
