@@ -110,7 +110,9 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
             for name, status in result.agents.items():
                 decision = result.decisions.get(name)
                 agents.append(format_agent(name, status, decision))
-            return {"ticker": ticker, "agents": "; ".join(agents), "evidence": result.evidence, "action": result.risk.action,
+            evaluated = getattr(result, 'evaluated_risk_evidence', ticker_evidence)
+            risk_inputs = {'supplied': ticker_evidence.model_dump(mode='json'), 'evaluated': evaluated.model_dump(mode='json')}
+            return {"ticker": ticker, "agents": "; ".join(agents), "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
                     "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
                     "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
 
@@ -202,6 +204,8 @@ def dashboard(config) -> None:
                 for row in analysis_table.rows:
                     with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):
                         ui.code(json.dumps(row['evidence'], indent=2, ensure_ascii=False), language='json').classes('w-full')
+                        ui.label('Supplied and evaluated risk inputs')
+                        ui.code(json.dumps(row['risk_inputs'], indent=2, ensure_ascii=False), language='json').classes('w-full')
             analysis_status.text = "Model scores are not probabilities of profit."
         except Exception as error:
             analysis_status.text = f"Analysis failed: {error}"

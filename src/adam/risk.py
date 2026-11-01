@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, FiniteFloat
@@ -45,6 +46,37 @@ class RiskResult(BaseModel):
     status: Literal["pass", "warning", "fail", "insufficient_evidence"]
     action: Literal["BUY", "HOLD", "SELL", "NO_TRADE"]
     reasons: tuple[str, ...]
+
+
+def derive_risk_evidence(supplied: RiskEvidence, market: dict | None, forecast: dict | None) -> RiskEvidence:
+    """Combine observed data with user inputs using the more conservative value."""
+    values = supplied.model_dump()
+
+    def number(value):
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+    def combine(name, observed, choose):
+        prior = values[name]
+        values[name] = None if observed is None else observed if prior is None else choose(prior, observed)
+
+    if market is not None:
+        try:
+            timestamp = datetime.fromisoformat(market.get('as_of', ''))
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                timestamp = None
+        except (ValueError, TypeError):
+            timestamp = None
+        combine('market_time', timestamp, min)
+        volatility = market.get('annualized_volatility')
+        combine('volatility', float(volatility) if number(volatility) and volatility >= 0 else None, max)
+        price, volume = market.get('last_close'), market.get('last_volume')
+        liquidity = price * volume if number(price) and number(volume) and price > 0 and volume >= 0 else None
+        combine('daily_dollar_volume', float(liquidity) if liquidity is not None and isfinite(liquidity) else None, min)
+    if forecast is not None:
+        lower = forecast.get('lower_returns')
+        downside = min(1.0, max(0.0, -min(lower))) if isinstance(lower, list) and lower and all(number(x) for x in lower) else None
+        combine('downside', downside, max)
+    return RiskEvidence.model_validate(values)
 
 
 def evaluate_risk(vote: Consensus, evidence: RiskEvidence, limits: RiskLimits, *, now: datetime | None = None) -> RiskResult:

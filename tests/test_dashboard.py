@@ -119,6 +119,8 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
         self.assertIn('risk_limits', rows[0]['risk'])
         self.assertEqual(rows[0]['evidence']['market']['last_close'], 100)
+        self.assertIn('supplied', rows[0]['risk_inputs'])
+        self.assertIn('evaluated', rows[0]['risk_inputs'])
 
 class RiskInputTests(unittest.IsolatedAsyncioTestCase):
     def test_parses_explicit_per_ticker_evidence(self):

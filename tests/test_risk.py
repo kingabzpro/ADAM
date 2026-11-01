@@ -17,6 +17,38 @@ EVIDENCE = dict(market_time=NOW, volatility=0.2, downside=0.1, position_fraction
 
 
 class RiskTests(unittest.TestCase):
+    def test_observed_market_and_forecast_evidence_cannot_be_made_safer_by_user_input(self):
+        from adam.risk import derive_risk_evidence
+        data = RiskEvidence(**(EVIDENCE | {'volatility': .1, 'downside': .02, 'daily_dollar_volume': 5000000}))
+        market = {'as_of': (NOW - timedelta(hours=1)).isoformat(), 'annualized_volatility': .6,
+                  'last_close': 100, 'last_volume': 10000}
+        forecast = {'lower_returns': [-.1, -.3, -.2]}
+        actual = derive_risk_evidence(data, market, forecast)
+        self.assertEqual(actual.market_time, NOW - timedelta(hours=1))
+        self.assertEqual(actual.volatility, .6)
+        self.assertEqual(actual.downside, .3)
+        self.assertEqual(actual.daily_dollar_volume, 1000000)
+        self.assertEqual(self.evaluate(actual).action, 'NO_TRADE')
+
+    def test_derived_values_fill_missing_and_keep_more_conservative_user_values(self):
+        from adam.risk import derive_risk_evidence
+        market = {'as_of': NOW.isoformat(), 'annualized_volatility': .2, 'last_close': 100, 'last_volume': 10000}
+        actual = derive_risk_evidence(RiskEvidence(volatility=.4, downside=.5, daily_dollar_volume=500), market,
+                                      {'lower_returns': [.1, .2]})
+        self.assertEqual((actual.market_time, actual.volatility, actual.downside, actual.daily_dollar_volume), (NOW, .4, .5, 500))
+        actual = derive_risk_evidence(RiskEvidence(), market, {'lower_returns': [.1, -.2]})
+        self.assertEqual((actual.market_time, actual.volatility, actual.downside, actual.daily_dollar_volume), (NOW, .2, .2, 1000000))
+
+    def test_invalid_observations_cannot_be_replaced_by_optimistic_user_values(self):
+        from adam.risk import derive_risk_evidence
+        market = {'as_of': 'bad', 'annualized_volatility': float('nan'), 'last_close': 100, 'last_volume': -1}
+        actual = derive_risk_evidence(RiskEvidence(**EVIDENCE), market, {'lower_returns': [float('nan')]})
+        self.assertIsNone(actual.market_time)
+        self.assertIsNone(actual.volatility)
+        self.assertIsNone(actual.daily_dollar_volume)
+        self.assertIsNone(actual.downside)
+        self.assertEqual(self.evaluate(actual).action, 'NO_TRADE')
+
     def evaluate(self, evidence, decisions=None):
         return evaluate_risk(consensus(decisions or [decision("market")]), evidence, LIMITS, now=NOW)
 

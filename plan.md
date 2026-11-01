@@ -634,6 +634,7 @@ adam/
 ### Phase 4 — Risk & Transparency
 
 - [x] Implement mandatory risk gate.
+  - The coordinator derives conservative market freshness, volatility, liquidity proxy, and forecast downside; portfolio exposure and trading costs still require supplied evidence.
 - [x] Add signal disagreement detection.
 - [ ] Show decision scores and explanations.
 - [ ] Add article summaries and financial highlights.

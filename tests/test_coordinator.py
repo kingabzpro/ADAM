@@ -140,7 +140,8 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.agents['forecast'], 'unavailable')
         self.assertEqual(result.agents['news'], 'unavailable')
         self.assertEqual(result.risk.action, 'NO_TRADE')
-        self.assertEqual(result.risk.status, 'insufficient_evidence')
+        self.assertEqual(result.risk.status, 'fail')
+        self.assertIn('daily_dollar_volume', result.risk.reasons)
 
     async def test_one_agent_failure_is_isolated(self):
         model = AsyncMock()
@@ -193,12 +194,13 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('risk_limits', result.risk.reasons)
 
     async def test_missing_forecast_cannot_approve_even_with_complete_risk_data(self):
+        from datetime import datetime
         from test_risk import EVIDENCE, NOW
         from unittest.mock import patch
         from adam.risk import RiskEvidence
         model = AsyncMock()
         model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
-        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), patch('adam.risk.datetime') as clock:
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), patch('adam.risk.datetime', wraps=datetime) as clock:
             clock.now.return_value = NOW
             result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence(**EVIDENCE))
         self.assertEqual(result.risk.action, 'NO_TRADE')
@@ -365,7 +367,23 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('market_time', result.risk.reasons)
         self.assertLess(result.evaluated_risk_evidence.market_time, current)
 
-    async def test_older_user_timestamp_and_missing_timestamp_are_preserved(self):
+    async def test_coordinator_risk_uses_observed_volatility_liquidity_and_forecast(self):
+        from datetime import datetime, timezone
+        from test_risk import EVIDENCE
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        user = RiskEvidence(**(EVIDENCE | {'market_time': datetime.now(timezone.utc), 'downside': .01,
+                                          'daily_dollar_volume': 5000000}))
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), \
+             patch('adam.coordinator.forecast_evidence', return_value={'lower_returns': [-.4, -.1]}):
+            result = await Coordinator(model, LIMITS, forecaster=object()).analyze('AAPL', user)
+        self.assertEqual(result.evaluated_risk_evidence.downside, .4)
+        self.assertEqual(result.evaluated_risk_evidence.daily_dollar_volume, 100000)
+        self.assertIn('downside', result.risk.reasons)
+        self.assertIn('daily_dollar_volume', result.risk.reasons)
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+
+    async def test_older_user_timestamp_and_missing_timestamp_are_handled_conservatively(self):
         from datetime import datetime, timezone
         model = AsyncMock()
         model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
@@ -375,7 +393,7 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             result = await coordinator.analyze('AAPL', RiskEvidence(market_time=older))
             missing = await coordinator.analyze('AAPL', RiskEvidence())
         self.assertEqual(result.evaluated_risk_evidence.market_time, older)
-        self.assertIsNone(missing.evaluated_risk_evidence.market_time)
+        self.assertEqual(missing.evaluated_risk_evidence.market_time, datetime.fromisoformat(missing.evidence['market']['as_of']))
 
     async def test_news_prompt_is_compact_without_losing_saved_evidence(self):
         model = AsyncMock()

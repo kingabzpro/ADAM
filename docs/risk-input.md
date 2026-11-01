@@ -1,6 +1,6 @@
 # Risk inputs
 
-ADAM requires explicitly supplied limits and per-ticker evidence before it can approve a research signal. Enter a JSON object in the dashboard. Missing evidence, stale market data, or missing critical market or forecast decisions results in **No Trade**. Limits and evidence are supplied by the user; ADAM does not independently verify the portfolio values or the age of each metric.
+ADAM requires explicitly supplied limits and per-ticker portfolio evidence before it can approve a research signal. Enter a JSON object in the dashboard. Missing evidence, stale market data, or missing critical market or forecast decisions results in **No Trade**. ADAM derives some market inputs as described below; it does not independently verify the supplied portfolio values.
 
 The example below shows the format only. Its values are not recommendations, and the timestamp is deliberately stale.
 
@@ -35,4 +35,6 @@ The example below shows the format only. Its values are not recommendations, and
 }
 ```
 
-`market_time` must include a timezone. The gate uses the earlier of this value and the timestamp of the latest daily price bar, which may conservatively predate the market close. Exposure, downside, costs, and loss are fractions; volatility must use the same units as its limit. Liquidity is daily dollar volume and reward/risk is a ratio. Each ticker needs its own evidence. **Hold** and **No Trade** are distinct results.
+ADAM derives the latest price-bar timestamp, annualized daily-return volatility, and a liquidity proxy (latest close multiplied by reported daily volume) from market data. It derives downside from the worst lower-quantile forecast return across the horizon, capped at 100%. If corresponding values are also supplied, the gate uses the earlier timestamp, higher volatility and downside, and lower liquidity. Invalid observed values remain missing. The liquidity figure is an estimate, not a verified execution price or guarantee of liquidity; adjusted prices and volume can affect it. The forecast quantile is model output, not a guaranteed loss bound. The dashboard and saved history show both supplied and evaluated risk inputs.
+
+If supplied, `market_time` must include a timezone; daily bar timestamps may conservatively predate the market close. Exposure, downside, costs, and loss are fractions; volatility and its limit use annualized units. Liquidity is estimated daily dollar volume and reward/risk is a ratio. Each ticker needs its own portfolio evidence. **Hold** and **No Trade** are distinct results.

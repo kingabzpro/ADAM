@@ -9,7 +9,7 @@ from adam.forecast import forecast_evidence
 from adam.fundamentals import fetch_fundamentals, fundamentals_evidence
 from adam.market import compare_market, fetch_history, market_evidence
 from adam.news import compact_news_evidence
-from adam.risk import RiskEvidence, RiskLimits, RiskResult, evaluate_risk
+from adam.risk import RiskEvidence, RiskLimits, RiskResult, derive_risk_evidence, evaluate_risk
 from adam.technical import technical_evidence
 
 
@@ -223,19 +223,13 @@ class Coordinator:
             if (kind, symbol) in self.snapshot_errors:
                 label = f'snapshot_{kind}' if symbol == ticker else 'snapshot_benchmark'
                 errors[label] = self.snapshot_errors[(kind, symbol)]
-        evaluated_risk = risk_evidence
-        market = evidence_by_agent.get('market')
-        if market and risk_evidence.market_time is not None:
-            observed_time = datetime.fromisoformat(market['as_of'])
-            evaluated_risk = risk_evidence.model_copy(update={
-                'market_time': min(risk_evidence.market_time, observed_time),
-            })
+        evaluated_risk = derive_risk_evidence(risk_evidence, evidence_by_agent.get('market'), evidence_by_agent.get('forecast'))
         result = (evaluate_risk(consensus(list(decisions.values())), evaluated_risk, self.limits)
                   if self.limits is not None else RiskResult(status="insufficient_evidence", action="NO_TRADE", reasons=("risk_limits",)))
         missing_critical = tuple(f"{name}_decision" for name in ("market", "forecast")
                                  if name not in decisions or not decisions[name].reliable or decisions[name].stale)
-        if missing_critical and result.status != "fail":
-            result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
+        if missing_critical:
+            result = RiskResult(status="fail" if result.status == "fail" else "insufficient_evidence", action="NO_TRADE",
                                 reasons=result.reasons + missing_critical)
         if self.offline:
             result = RiskResult(status='fail' if result.status == 'fail' else 'insufficient_evidence',
