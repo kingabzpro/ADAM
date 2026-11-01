@@ -138,3 +138,37 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.agents['market'], 'failed')
         self.assertEqual(result.evidence['market']['last_close'], 100.0)
         self.assertEqual(result.evidence['technical']['sma_20'], 100.0)
+
+    async def test_market_agent_includes_benchmark_comparison(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        prices = history([float(n) for n in range(100, 140)])
+        with patch('adam.coordinator.fetch_history', return_value=prices) as fetch:
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.evidence['market']['comparison']['benchmark'], 'SPY')
+        self.assertTrue(any(call.args[0] == 'SPY' for call in fetch.call_args_list))
+
+    async def test_unavailable_benchmark_is_explicit(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        def fetch(ticker, period):
+            if ticker == 'SPY':
+                raise RuntimeError('benchmark unavailable')
+            return history([100.] * 40)
+        with patch('adam.coordinator.fetch_history', side_effect=fetch):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertIsNone(result.evidence['market']['comparison'])
+        self.assertEqual(result.evidence['market']['comparison_status'], 'unavailable')
+
+    async def test_missing_market_comparison_abstains_from_vote(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        def fetch(ticker, period):
+            if ticker == 'SPY':
+                raise RuntimeError('offline')
+            return history([100.] * 40)
+        with patch('adam.coordinator.fetch_history', side_effect=fetch):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertFalse(result.decisions['market'].reliable)
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertIn('market_decision', result.risk.reasons)

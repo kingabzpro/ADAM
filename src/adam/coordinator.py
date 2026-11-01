@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from adam.decisions import Decision, consensus
 from adam.forecast import forecast_evidence
 from adam.fundamentals import fetch_fundamentals, fundamentals_evidence
-from adam.market import fetch_history, market_evidence
+from adam.market import compare_market, fetch_history, market_evidence
 from adam.risk import RiskEvidence, RiskLimits, RiskResult, evaluate_risk
 from adam.technical import technical_evidence
 
@@ -62,6 +62,8 @@ class Coordinator:
                     result = await self.model.assess(ticker, name, evidence)
                 if result.ticker != ticker or result.agent != name or result.status != "completed":
                     raise ValueError("Mismatched agent response")
+                if name == 'market' and evidence.get('comparison_status') != 'available':
+                    result = result.model_copy(update={'reliable': False})
                 decisions[name] = result
                 agents[name] = "completed"
                 emit(name, "completed")
@@ -92,7 +94,19 @@ class Coordinator:
             emit("market_data", "completed")
 
             async def market():
-                return await asyncio.to_thread(market_evidence, history)
+                evidence = await asyncio.to_thread(market_evidence, history)
+                emit('benchmark', 'started')
+                try:
+                    benchmark = history if ticker == 'SPY' else await asyncio.to_thread(fetch_history, 'SPY', '3mo')
+                    evidence['comparison'] = await asyncio.to_thread(compare_market, history, benchmark)
+                    evidence['comparison_status'] = 'available'
+                    emit('benchmark', 'completed')
+                except Exception as error:
+                    evidence['comparison'] = None
+                    evidence['comparison_status'] = 'unavailable'
+                    errors['benchmark'] = str(error)
+                    emit('benchmark', 'failed')
+                return evidence
 
             async def technical():
                 return await asyncio.to_thread(technical_evidence, history)
