@@ -77,3 +77,15 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.risk.status, 'insufficient_evidence')
         self.assertEqual(result.risk.action, 'NO_TRADE')
         self.assertIn('risk_limits', result.risk.reasons)
+
+    async def test_missing_forecast_cannot_approve_even_with_complete_risk_data(self):
+        from test_risk import EVIDENCE, NOW
+        from unittest.mock import patch
+        from adam.risk import RiskEvidence
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), patch('adam.risk.datetime') as clock:
+            clock.now.return_value = NOW
+            result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence(**EVIDENCE))
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertIn('forecast_decision', result.risk.reasons)

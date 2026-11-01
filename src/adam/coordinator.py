@@ -84,4 +84,9 @@ class Coordinator:
         await asyncio.gather(market_stream(), run("fundamentals", fundamentals))
         result = (evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
                   if self.limits is not None else RiskResult(status="insufficient_evidence", action="NO_TRADE", reasons=("risk_limits",)))
+        missing_critical = tuple(f"{name}_decision" for name in ("market", "forecast")
+                                 if name not in decisions or not decisions[name].reliable or decisions[name].stale)
+        if missing_critical and result.status != "fail":
+            result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
+                                reasons=result.reasons + missing_critical)
         return AnalysisResult(ticker, agents, decisions, result, errors)
