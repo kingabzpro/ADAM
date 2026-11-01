@@ -12,6 +12,15 @@ def fetch_history(ticker: str, period: str = "1mo"):
     source = yf.Ticker(ticker)
     return yahoo_request(lambda: source.history(period=period, interval="1d", raise_errors=True))
 
+
+def fetch_history_between(ticker: str, start, end):
+    """Fetch daily history for an explicit date range (end exclusive), for point-in-time studies."""
+    ticker = ticker.strip().upper()
+    if not ticker:
+        raise ValueError("Ticker must not be blank")
+    source = yf.Ticker(ticker)
+    return yahoo_request(lambda: source.history(start=str(start), end=str(end), interval="1d", raise_errors=True))
+
 async def fetch_many(tickers: list[str], concurrency: int = 4):
     if type(concurrency) is not int or concurrency < 1:
         raise ValueError("concurrency must be a positive integer")

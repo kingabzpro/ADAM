@@ -25,6 +25,7 @@ adam-benchmark = "adam.benchmark:main"
 adam-calibrate = "adam.calibration:main"
 adam-outcomes = "adam.evaluation:main"
 adam-paper = "adam.paper:main"
+adam-backtest = "adam.study:main"
 
 [project.optional-dependencies]
 forecast = [
