@@ -9,11 +9,12 @@ requires-python = ">=3.12"
 dependencies = [
     "curl-cffi>=0.15",
     "defusedxml>=0.7.1",
+    "fastapi>=0.162.0",
     "httpx>=0.28.1",
-    "nicegui>=3.18.0",
     "pydantic>=2.14.2",
     "pyyaml>=6.0.3",
     "trafilatura>=2.3.1",
+    "uvicorn>=0.54.0",
     "yfinance>=1.7.0",
 ]
 
@@ -22,6 +23,7 @@ adam = "adam:main"
 adam-setup = "adam.setup:main"
 adam-benchmark = "adam.benchmark:main"
 adam-calibrate = "adam.calibration:main"
+adam-outcomes = "adam.evaluation:main"
 adam-paper = "adam.paper:main"
 
 [project.optional-dependencies]

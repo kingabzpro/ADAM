@@ -1,6 +1,6 @@
 import unittest
 
-from adam.dashboard import evidence_summary, forecast_chart, safe_news_link, vote_summary
+from adam.presentation import evidence_summary, forecast_chart, safe_news_link, vote_summary
 from test_decisions import decision
 
 

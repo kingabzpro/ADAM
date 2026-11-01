@@ -127,6 +127,18 @@ class PaperTests(unittest.TestCase):
             main()
         self.assertEqual(json.loads(output.getvalue())['cash'], 10000)
 
+    def test_analyses_command_lists_saved_analysis_ids(self):
+        import json
+        from unittest.mock import patch
+        from adam.paper import main
+        identifier = self.record()
+        with patch('sys.argv', ['adam-paper', '--db', str(self.path), 'analyses', 'AAPL']), \
+             patch('sys.stdout', new_callable=__import__('io').StringIO) as output:
+            main()
+        records = json.loads(output.getvalue())
+        self.assertEqual([record['id'] for record in records], [identifier])
+        self.assertEqual(records[0]['action'], 'BUY')
+
     def test_existing_database_without_paper_tables_has_clear_error(self):
         import sqlite3
         from contextlib import closing

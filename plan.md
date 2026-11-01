@@ -46,7 +46,7 @@ The initial focus is stock analysis and paper-trading research. Portfolio optimi
 | News extraction | Trafilatura / Crawl4AI | Extract public financial news |
 | Technical analysis | NumPy / pandas | Indicators and market signals |
 | Backend | FastAPI | Local application API |
-| Dashboard | NiceGUI | Interactive real-time interface |
+| Dashboard | FastAPI + single static page | Ticker input, streamed results, no framework |
 | Concurrency | asyncio | Parallel task orchestration |
 | Sentiment optimization | ONNX Runtime (optional) | Efficient CPU inference |
 | Backtesting | vectorbt | Historical strategy evaluation |
@@ -369,9 +369,9 @@ Concurrency must improve throughput without exhausting RAM, CPU, or VRAM.
 
 ## 9. Real-Time Dashboard
 
-**Framework:** NiceGUI + FastAPI
+**Framework:** FastAPI serving one static page; live updates via Server-Sent Events
 
-The dashboard should display intermediate results immediately as each component finishes.
+The dashboard displays intermediate results immediately as each component finishes.
 
 ### Main dashboard
 
@@ -606,7 +606,8 @@ adam/
   - Built-in defaults and optional YAML configure ticker, data, and D3 concurrency; other configuration needs remain under review.
 - [ ] Create the startup supervisor.
   - The dashboard reports local Ollama server and D3 model readiness; broader startup and hardware checks remain outstanding.
-- [x] Build NiceGUI dashboard shell.
+- [x] Build web dashboard shell.
+  - Replaced NiceGUI with a FastAPI-served static page: ticker input, SSE event stream, and a results table; offline mode runs with `ADAM_OFFLINE=1`.
 - [x] Implement Yahoo Finance market collection.
 - [x] Add multi-ticker requests.
 - [x] Implement concurrent execution.
@@ -638,8 +639,10 @@ adam/
 - [x] Add signal disagreement detection.
 - [ ] Show decision scores and explanations.
   - The dashboard shows scores, pre-risk vote counts, selected evidence, forecast quantiles, and news links. D3 does not produce causal explanations; richer evidence presentation remains outstanding.
-- [ ] Add article summaries and financial highlights.
-- [ ] Implement live event streaming.
+- [x] Add article summaries and financial highlights.
+  - Per-article summaries and financial highlights appear in the dashboard evidence details.
+- [x] Implement live event streaming.
+  - The dashboard consumes an SSE stream of coordinator events and per-ticker results; reconnect and resume after a dropped stream remain outstanding.
 - [ ] Add full decision timeline.
 
 ### Phase 5 — Performance
@@ -665,9 +668,9 @@ adam/
 - [ ] Test risk-adjusted performance.
   - Rolling forecast evaluation measures direction and empirical quantile coverage. A calibration command evaluates independently labeled D3 decisions; representative held-out datasets and larger studies remain outstanding.
 - [ ] Add decision history and performance tracking.
-  - Saved analyses can be evaluated as independent hypothetical Buy outcomes over subsequent completed sessions; portfolio-level tracking remains outstanding.
+  - Saved analyses can be evaluated as independent hypothetical Buy outcomes with `uv run adam-outcomes` over subsequent completed sessions; portfolio-level tracking remains outstanding.
 - [ ] Implement forward and paper-trading evaluation.
-  - Added a local single-ticker paper ledger and dashboard controls using saved risk-gated analyses and manually supplied hypothetical prices. Automated forward pricing, multi-asset portfolios, and broader evaluation remain outstanding.
+  - Added a local single-ticker paper ledger and `adam-paper` CLI controls using saved risk-gated analyses and manually supplied hypothetical prices. Automated forward pricing, multi-asset portfolios, and broader evaluation remain outstanding.
 
 ### Phase 7 — Distribution
 
@@ -675,7 +678,7 @@ adam/
 - [ ] Document GPU and CPU requirements.
   - Added platform and model capacity guidance with links to Ollama's current hardware requirements; additional hardware testing remains outstanding.
 - [ ] Add offline operation.
-  - Added snapshot-based offline research with cached news, cached Timestral, and mandatory No Trade; validated on Windows with external socket connections blocked. Cross-platform live validation remains outstanding.
+  - Added snapshot-based offline research with cached news, cached Timestral, and mandatory No Trade (`ADAM_OFFLINE=1`); validated on Windows with external socket connections blocked. Cross-platform live validation remains outstanding.
 - [ ] Publish installation and development guides.
   - Added installation, configuration, and testing guides; full supported-platform installation validation remains outstanding.
 - [ ] Add optional Docker Compose packaging.

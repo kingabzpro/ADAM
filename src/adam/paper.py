@@ -208,6 +208,9 @@ def main():
     status.add_argument('--price', type=float)
     history = commands.add_parser('history', help='Show recent simulated trades')
     history.add_argument('ticker')
+    analyses = commands.add_parser('analyses', help='List recent saved analyses to find an ID for trade')
+    analyses.add_argument('ticker')
+    analyses.add_argument('--limit', type=int, default=20)
     args = parser.parse_args()
     try:
         if args.command == 'init':
@@ -217,6 +220,11 @@ def main():
             result = execute_paper(args.db, args.analysis_id, price=args.price)
         elif args.command == 'status':
             result = paper_status(args.db, args.ticker, price=args.price)
+        elif args.command == 'analyses':
+            from adam.history import read_history
+            records = read_history(args.db, ticker=args.ticker, limit=args.limit)
+            result = [{'id': record['id'], 'time': record['created_at'], 'ticker': record['ticker'],
+                       'action': record['risk']['action'], 'risk': record['risk']['status']} for record in records]
         else:
             result = paper_trades(args.db, args.ticker)
         print(json.dumps(result, indent=2, allow_nan=False))

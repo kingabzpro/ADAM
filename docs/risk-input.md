@@ -1,6 +1,6 @@
 # Risk inputs
 
-ADAM requires explicitly supplied limits and per-ticker portfolio evidence before it can approve a research signal. Enter a JSON object in the dashboard. Missing evidence, stale market data, or missing critical market or forecast decisions results in **No Trade**. ADAM derives some market inputs as described below; it does not independently verify the supplied portfolio values.
+ADAM requires explicitly supplied limits and per-ticker portfolio evidence before it can approve a research signal. The web page uses conservative built-in limits; to approve trades, supply your own `RiskLimits` and per-ticker `RiskEvidence` programmatically to `adam.dashboard.run_analysis`, or parse the JSON format below with `adam.dashboard.parse_risk_input`. Missing evidence, stale market data, or missing critical market or forecast decisions results in **No Trade**. ADAM derives some market inputs as described below; it does not independently verify the supplied portfolio values.
 
 The example below shows the format only. Its values are not recommendations, and the timestamp is deliberately stale.
 

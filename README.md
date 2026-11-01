@@ -20,21 +20,21 @@ uv run adam
 
 Setup detects Windows, macOS, or Linux, installs or updates [Ollama](https://ollama.com/) when needed, and downloads the local D3 model (about 3.3 GB). The official installer may request administrator privileges; on Linux it may configure a service and GPU dependencies. The first forecast or sentiment run also downloads its model.
 
-Enter ticker symbols in the dashboard, select the evidence streams you want, and run analysis. Configure your own limits and per-ticker inputs using the [risk input guide](docs/risk-input.md); missing critical inputs produce **No Trade**. Analysis history and supplied risk inputs are stored locally in `~/.adam/history.sqlite`.
+Open http://127.0.0.1:8080, enter ticker symbols, and run analysis. The page streams each agent's progress as it finishes and shows the per-agent signals, consensus, and risk-gated result. Risk limits use conservative built-in defaults; the [risk input guide](docs/risk-input.md) covers supplying your own programmatically. Missing critical inputs produce **No Trade**. Analysis history is stored locally in `~/.adam/history.sqlite`.
 
 Expand a ticker's evidence to see the vote breakdown, forecast quantiles, news sources, and risk inputs. D3 provides choice scores, not a causal explanation.
 
 Concurrency settings are optional; see the [configuration guide](docs/configuration.md).
 For platform requirements and troubleshooting, see the [installation guide](docs/install.md).
 
-Online analyses save local data snapshots for [offline research](docs/offline.md). Offline results always show **No Trade**.
+Online analyses save local data snapshots for [offline research](docs/offline.md) (`ADAM_OFFLINE=1`). Offline results always show **No Trade**.
 
-For simulated single-ticker tracking, see [paper trading](docs/paper.md).
+For simulated single-ticker tracking and saved-Buy outcome evaluation, see [paper trading](docs/paper.md) and `uv run adam-outcomes TICKER`.
 
 ## Built with
 
 - **Market data:** Yahoo Finance · **Forecasts:** Timestral · **Sentiment:** FinBERT
-- **Decisions:** D3 via Ollama · **Interface:** NiceGUI · **Runtime:** Python and uv
+- **Decisions:** D3 via Ollama · **Interface:** FastAPI with a single static page and SSE streaming · **Runtime:** Python and uv
 
 Model inference runs locally; market data, news searches, setup, and model downloads use the internet. News uses a [limited article source](docs/news.md) and falls back to headlines; results may be unrelated to the ticker. FinBERT weights are [CC BY-NC-SA 4.0](https://huggingface.co/ProsusAI/finbert); review their terms before use.
 

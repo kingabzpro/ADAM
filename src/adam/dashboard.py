@@ -1,52 +1,37 @@
 import asyncio
-import json
 import importlib.util
+import json
+import os
 from pathlib import Path
 
 import httpx
-from nicegui import ui
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, StreamingResponse
 
 from adam.coordinator import Coordinator
 from adam.d3 import D3Client
-from adam.evaluation import evaluate_saved_buys
 from adam.forecast import shared_forecaster
 from adam.health import health_message, ollama_health
-from adam.history import record_analysis, read_history
+from adam.history import record_analysis
 from adam.news import news_evidence
-from adam.paper import create_account, execute_paper, paper_status, paper_trades
-from adam.presentation import evidence_summary, forecast_chart, safe_news_link, vote_summary
-from adam.sentiment import shared_classifier
+from adam.presentation import evidence_summary, safe_news_link, vote_summary
 from adam.risk import RiskEvidence, RiskLimits
-from adam.snapshots import read_news, read_prices
+from adam.sentiment import shared_classifier
+from adam.snapshots import read_news
 
-from adam.market import fetch_history, fetch_many
+
+HISTORY_PATH = Path.home() / '.adam' / 'history.sqlite'
+SNAPSHOT_DIRECTORY = Path.home() / '.adam' / 'snapshots'
+
+# Conservative built-in limits; supplied limits and per-ticker evidence are needed to approve trades (docs/risk-input.md).
+DEFAULT_LIMITS = RiskLimits(max_age_seconds=3600, max_volatility=0.5, max_downside=0.2,
+                            max_position_fraction=0.1, max_concentration=0.3, min_daily_dollar_volume=1000000,
+                            max_correlated_exposure=0.4, min_reward_risk=2, max_transaction_cost_fraction=0.01,
+                            max_loss_fraction=0.05)
 
 
 def parse_tickers(value: str) -> list[str]:
     return list(dict.fromkeys(ticker.strip().upper() for ticker in value.split(",") if ticker.strip()))
-
-
-async def saved_buy_report(ticker, history_path):
-    records = await asyncio.to_thread(read_history, history_path, ticker=ticker, limit=1000)
-    prices = await asyncio.to_thread(fetch_history, ticker, '1y')
-    return evaluate_saved_buys(records, prices, ticker=ticker)
-
-
-def market_rows(tickers, results):
-    rows = []
-    for ticker, result in zip(tickers, results, strict=True):
-        row = {"ticker": ticker, "date": "", "close": "", "status": "Data unavailable"}
-        if not isinstance(result, BaseException):
-            if result.empty or "Close" not in result:
-                row["status"] = "No price history"
-            else:
-                closes = result["Close"].dropna()
-                if closes.empty:
-                    row["status"] = "No price history"
-                else:
-                    row.update(date=str(closes.index[-1].date()), close=f"{closes.iloc[-1]:.2f}", status="Daily close")
-        rows.append(row)
-    return rows
 
 
 def parse_risk_input(text: str):
@@ -76,7 +61,20 @@ def format_agent(name, status, decision):
     return f"{name}: {decision.signal} ({scores}){label}"
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None) -> list[dict]:
+def agent_signals(result) -> dict:
+    signals = {}
+    for name, status in result.agents.items():
+        decision = result.decisions.get(name)
+        if decision is None:
+            signals[name] = {'signal': None, 'confidence': None, 'abstained': True, 'status': status}
+        else:
+            signals[name] = {'signal': decision.signal, 'confidence': max(decision.probabilities.values()),
+                             'abstained': not decision.reliable or decision.stale or decision.status != "completed",
+                             'status': status}
+    return signals
+
+
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, on_result=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None) -> list[dict]:
     if type(ticker_concurrency) is not int or ticker_concurrency < 1:
         raise ValueError('ticker_concurrency must be a positive integer')
     async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
@@ -117,250 +115,98 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
             vote = vote_summary(list(result.decisions.values()))
             counts = vote['counts']
             vote_display = f"{vote['signal'] or 'No consensus'}: BUY {counts['BUY']}, HOLD {counts['HOLD']}, SELL {counts['SELL']}"
-            return {"ticker": ticker, "agents": "; ".join(agents), "vote": vote, "vote_display": vote_display,
-                    "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
-                    "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
-                    "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
+            row = {"ticker": ticker, "agents": "; ".join(agents), "vote": vote, "vote_display": vote_display,
+                   "signals": agent_signals(result),
+                   "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
+                   "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
+                   "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
+            if on_result is not None:
+                on_result(row)
+            return row
 
-        return await asyncio.gather(*(analyze(ticker) for ticker in tickers))
+        return list(await asyncio.gather(*(analyze(ticker) for ticker in tickers)))
 
 
-def dashboard(config) -> None:
-    ui.label("ADAM").classes("text-h4")
-    ui.label("Local market research and decision support")
-    ui.label("Research signals are preliminary. No Trade is returned until risk limits and evidence are configured.")
-    health_status = ui.label('Checking local Ollama...')
+def result_payload(row: dict) -> dict:
+    news = row['evidence'].get('news') or {}
+    links = []
+    for item in news.get(news.get('basis', ''), []):
+        links.append({'title': item.get('title', 'News'), 'url': safe_news_link(item.get('url')),
+                      'published': item.get('published'), 'sentiment': (item.get('sentiment') or {}).get('label', 'unavailable'),
+                      'summary': item.get('summary'), 'highlights': item.get('financial_highlights', [])})
+    forecast = row['evidence'].get('forecast') or {}
+    quantiles = {name: forecast.get(name) for name in
+                 ('horizons', 'lower_returns', 'median_returns', 'upper_returns')}
+    return {'ticker': row['ticker'], 'agents': row['agents'], 'signals': row['signals'], 'vote': row['vote'],
+            'vote_display': row['vote_display'], 'action': row['action'], 'risk': row['risk'], 'errors': row['errors'],
+            'summary': evidence_summary(row['evidence']), 'forecast': quantiles, 'news_links': links,
+            'risk_inputs': row['risk_inputs'], 'evidence': row['evidence']}
 
-    async def check_health():
+
+def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, history_path=HISTORY_PATH,
+               forecast=None, news=None) -> FastAPI:
+    page = Path(__file__).parent / 'static' / 'index.html'
+    if forecast is None:
+        forecast = importlib.util.find_spec('timestral') is not None
+    if news is None:
+        news = importlib.util.find_spec('transformers') is not None
+    app = FastAPI(title='ADAM', docs_url=None, redoc_url=None)
+
+    @app.get('/')
+    async def serve_page():
+        return FileResponse(page)
+
+    @app.get('/api/health')
+    async def health():
         async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
-            health_status.text = health_message(await ollama_health(client))
+            return {'message': health_message(await ollama_health(client))}
 
-    ui.timer(0.1, check_health, once=True)
-    ui.button('Check model readiness', on_click=check_health)
-    snapshot_directory = Path.home() / '.adam' / 'snapshots'
-    offline_toggle = ui.checkbox('Offline: use saved snapshots, always No Trade', value=False)
-    tickers = ui.input("Tickers, separated by commas", value="AAPL, MSFT")
-    status = ui.label()
-    table = ui.table(columns=[
-        {"name": "ticker", "label": "Ticker", "field": "ticker"},
-        {"name": "date", "label": "Date", "field": "date"},
-        {"name": "close", "label": "Close", "field": "close"},
-        {"name": "status", "label": "Status", "field": "status"},
-    ], rows=[], row_key="ticker")
-
-    async def load():
-        symbols = parse_tickers(tickers.value or "")
-        if not symbols:
-            status.text = "Enter at least one ticker."
-            return
-        button.disable()
-        status.text = "Loading market data..."
-        table.rows = []
-        try:
-            if offline_toggle.value:
-                results = await asyncio.gather(*(asyncio.to_thread(read_prices, snapshot_directory, symbol)
-                                                 for symbol in symbols), return_exceptions=True)
-                results = [item[0] if not isinstance(item, BaseException) else item for item in results]
-            else:
-                results = await fetch_many(symbols)
-            table.rows = market_rows(symbols, results)
-            status.text = 'Saved snapshots; dates may be stale.' if offline_toggle.value else "Daily closing prices, adjusted by Yahoo Finance."
-        finally:
-            button.enable()
-
-    button = ui.button("Load prices", on_click=load)
-    ui.separator()
-    ui.label("Agent analysis").classes("text-h6")
-    history_path = Path.home() / '.adam' / 'history.sqlite'
-    ui.label(f'Analyses and supplied risk inputs are saved locally to {history_path}.')
-    analysis_status = ui.label("Requires Ollama and the local d3:2b model. Run uv run adam-setup.")
-    forecast_toggle = ui.checkbox('Include Timestral forecast (requires forecast extra)', value=importlib.util.find_spec('timestral') is not None)
-    news_toggle = ui.checkbox('Include news sentiment (requires sentiment extra)', value=False)
-    risk_input = ui.textarea("Optional risk limits and per-ticker evidence (JSON)").classes("w-full")
-    ui.label('Analysis timeline')
-    timeline = ui.log(max_lines=200).classes('w-full h-40')
-    analysis_table = ui.table(columns=[
-        {"name": "ticker", "label": "Ticker", "field": "ticker"},
-        {"name": "agents", "label": "Agent signals and model scores", "field": "agents"},
-        {"name": "vote_display", "label": "Consensus before risk", "field": "vote_display"},
-        {"name": "action", "label": "Risk-gated result", "field": "action"},
-        {"name": "risk", "label": "Risk status", "field": "risk"},
-        {"name": "errors", "label": "Errors", "field": "errors"},
-    ], rows=[], row_key="ticker")
-
-    evidence_details = ui.column().classes('w-full')
-
-    async def analyze():
-        symbols = parse_tickers(tickers.value or "")
+    @app.get('/api/analysis')
+    async def analysis(tickers: str):
+        symbols = parse_tickers(tickers)
         if not symbols or len(symbols) > 20:
-            analysis_status.text = "Enter between 1 and 20 tickers."
-            return
-        analyze_button.disable()
-        analysis_status.text = "Analyzing..."
-        analysis_table.rows = []
-        timeline.clear()
-        evidence_details.clear()
+            raise HTTPException(status_code=400, detail='Enter between 1 and 20 valid ticker symbols')
+        queue: asyncio.Queue = asyncio.Queue()
 
-        def show_event(event):
-            timeline.push(f"{event['time']} {event['ticker']} {event['stage']}: {event['status']}")
+        def on_event(event):
+            queue.put_nowait(('event', event))
 
-        try:
-            limits, evidence = parse_risk_input(risk_input.value or "")
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path, data_concurrency=config.data_concurrency, ticker_concurrency=config.ticker_concurrency, offline=offline_toggle.value, snapshot_directory=snapshot_directory)
-            with evidence_details:
-                for row in analysis_table.rows:
-                    with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):
-                        ui.label('D3 supplies choice scores, not a causal explanation. These are selected input facts.')
-                        for name, text in evidence_summary(row['evidence']).items():
-                            ui.label(f'{name.title()}: {text}')
-                        vote = row['vote']
-                        ui.label(f"{row['vote_display']}; disagreement: {'yes' if vote['disagreement'] else 'no'}; abstained decisions: {', '.join(vote['abstained']) or 'none'}")
-                        chart = forecast_chart(row['evidence'].get('forecast', {}))
-                        if chart is not None:
-                            ui.label('Forecast return quantiles, not guaranteed outcomes')
-                            ui.echart(chart).classes('w-full h-72')
-                        news = row['evidence'].get('news', {})
-                        for item in news.get(news.get('basis', ''), []):
-                            target = safe_news_link(item.get('url'))
-                            if target:
-                                ui.link(item.get('title', 'News'), target, new_tab=True).props('rel="noopener noreferrer"')
-                            else:
-                                ui.label(item.get('title', 'News'))
-                            ui.label(f"{item.get('published') or 'Date unavailable'} · sentiment: {item.get('sentiment', {}).get('label', 'unavailable')}")
-                            if item.get('summary'):
-                                ui.label(item['summary'])
-                            for highlight in item.get('financial_highlights', []):
-                                ui.label(highlight)
-                        with ui.expansion('Raw agent evidence').classes('w-full'):
-                            ui.code(json.dumps(row['evidence'], indent=2, ensure_ascii=False), language='json').classes('w-full')
-                        ui.label('Supplied and evaluated risk inputs')
-                        ui.code(json.dumps(row['risk_inputs'], indent=2, ensure_ascii=False), language='json').classes('w-full')
-            analysis_status.text = "Model scores are not probabilities of profit."
-        except Exception as error:
-            analysis_status.text = f"Analysis failed: {error}"
-        finally:
-            analyze_button.enable()
+        def on_result(row):
+            queue.put_nowait(('result', result_payload(row)))
 
-    analyze_button = ui.button("Analyze", on_click=analyze)
-    ui.separator()
-    ui.label('Saved analysis history').classes('text-h6')
-    history_status = ui.label()
-    history_table = ui.table(columns=[
-        {'name': 'id', 'label': 'Analysis ID', 'field': 'id'},
-        {'name': 'time', 'label': 'Saved at (UTC)', 'field': 'time'},
-        {'name': 'ticker', 'label': 'Ticker', 'field': 'ticker'},
-        {'name': 'action', 'label': 'Risk-gated result', 'field': 'action'},
-        {'name': 'risk', 'label': 'Risk status', 'field': 'risk'},
-    ], rows=[], row_key='id')
-
-    saved_records = {}
-    history_details = ui.column().classes('w-full')
-
-    def select_history(event):
-        history_details.clear()
-        record = saved_records.get(event.value)
-        if record is not None:
-            with history_details:
-                ui.code(json.dumps(record, indent=2, ensure_ascii=False), language='json').classes('w-full')
-
-    history_selector = ui.select({}, label='View saved analysis', on_change=select_history).classes('w-full')
-
-    async def show_history():
-        try:
-            records = await asyncio.to_thread(read_history, history_path)
-            history_table.rows = [{'id': record['id'], 'time': record['created_at'], 'ticker': record['ticker'],
-                                   'action': record['risk']['action'], 'risk': record['risk']['status']}
-                                  for record in records]
-            saved_records.clear()
-            saved_records.update({str(record['id']): record for record in records})
-            history_selector.set_options({str(record['id']): f"{record['created_at']} — {record['ticker']}" for record in records}, value=None)
-            history_details.clear()
-            history_status.text = f'{len(records)} recent analyses'
-        except Exception as error:
-            history_status.text = f'Unable to read history: {error}'
-
-    ui.button('Load history', on_click=show_history)
-    with ui.expansion('Paper trading — simulation only').classes('w-full'):
-        ui.label('Local simulation only. No brokerage order is placed; prices are manually entered and unverified.')
-        with ui.row():
-            paper_ticker = ui.input('Paper account ticker', value='AAPL')
-            paper_cash = ui.number('Starting paper cash', value=10000, min=0.01)
-            paper_cost = ui.number('Fee per side (basis points)', value=0, min=0, max=9999)
-        with ui.row():
-            paper_analysis = ui.number('Saved analysis ID', min=1, precision=0)
-            paper_price = ui.number('Hypothetical price', min=0.000001)
-        paper_message = ui.label()
-        paper_output = ui.code('', language='json').classes('w-full')
-
-        async def refresh_paper():
-            ticker = (paper_ticker.value or '').strip().upper()
+        async def run():
             try:
-                status = await asyncio.to_thread(paper_status, history_path, ticker, price=paper_price.value)
-                trades = await asyncio.to_thread(paper_trades, history_path, ticker)
-                paper_output.content = json.dumps({'account': status, 'trades': trades}, indent=2, ensure_ascii=False)
-                paper_message.text = 'Paper account loaded. Prices are hypothetical.'
+                await run_analysis(symbols, config.inference_concurrency, DEFAULT_LIMITS, forecast=forecast,
+                                   news=news, on_event=on_event, on_result=on_result, history_path=history_path,
+                                   data_concurrency=config.data_concurrency,
+                                   ticker_concurrency=config.ticker_concurrency, offline=offline,
+                                   snapshot_directory=snapshot_directory)
             except Exception as error:
-                paper_output.content = ''
-                paper_message.text = f'Unable to load paper account: {error}'
-
-        async def make_paper_account():
-            paper_create.disable()
-            try:
-                await asyncio.to_thread(create_account, history_path, paper_ticker.value or '',
-                                        initial_cash=paper_cash.value, cost_bps=paper_cost.value)
-                await refresh_paper()
-            except Exception as error:
-                paper_message.text = f'Unable to create paper account: {error}'
+                queue.put_nowait(('error', {'message': str(error)}))
             finally:
-                paper_create.enable()
+                queue.put_nowait(None)
 
-        async def make_paper_trade():
-            if offline_toggle.value:
-                paper_message.text = 'Offline research cannot create a paper trade.'
-                return
-            paper_trade.disable()
+        async def stream():
+            task = asyncio.create_task(run())
             try:
-                identifier = paper_analysis.value
-                if type(identifier) is not int and (type(identifier) is not float or not identifier.is_integer()):
-                    raise ValueError('Enter a whole-number saved analysis ID')
-                result = await asyncio.to_thread(execute_paper, history_path, int(identifier), price=paper_price.value,
-                                                 expected_ticker=paper_ticker.value or '')
-                await refresh_paper()
-                paper_message.text = f"Simulated {result['side']} recorded. " + paper_message.text
-            except Exception as error:
-                paper_message.text = f'Paper trade rejected: {error}'
+                while True:
+                    item = await queue.get()
+                    if item is None:
+                        yield 'event: done\ndata: {}\n\n'
+                        return
+                    kind, payload = item
+                    yield f'event: {kind}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n'
             finally:
-                paper_trade.enable()
-
-        with ui.row():
-            paper_create = ui.button('Create paper account', on_click=make_paper_account)
-            ui.button('Load paper account', on_click=refresh_paper)
-            paper_trade = ui.button('Record simulated trade', on_click=make_paper_trade)
-    ui.label('Hypothetical Buy outcomes: next session open to fifth completed session close, before costs. Overlapping outcomes are not portfolio returns.')
-    outcomes_status = ui.label()
-    outcomes = ui.code('', language='json').classes('w-full')
-
-    async def show_outcomes():
-        if offline_toggle.value:
-            outcomes_status.text = 'Outcome evaluation requires online market data.'
-            return
-        symbols = parse_tickers(tickers.value or '')
-        if len(symbols) != 1:
-            outcomes_status.text = 'Enter exactly one ticker to evaluate saved Buy decisions.'
-            return
-        outcomes_button.disable()
-        outcomes_status.text = 'Loading saved decisions and prices...'
-        try:
-            report = await saved_buy_report(symbols[0], history_path)
-            outcomes.content = json.dumps(report, indent=2, ensure_ascii=False)
-            outcomes_status.text = f"{report['completed_count']} completed outcomes from up to 1,000 saved analyses."
-        except Exception as error:
-            outcomes_status.text = f'Unable to evaluate saved decisions: {error}'
-        finally:
-            outcomes_button.enable()
-
-    outcomes_button = ui.button('Evaluate saved Buy decisions', on_click=show_outcomes)
+                task.cancel()
+        return StreamingResponse(stream(), media_type='text/event-stream',
+                                 headers={'Cache-Control': 'no-cache'})
+    return app
 
 
 def run_dashboard(config) -> None:
-    ui.run(lambda: dashboard(config), title="ADAM", host="127.0.0.1", reload=False)
+    import uvicorn
+
+    offline = os.environ.get('ADAM_OFFLINE', '').strip().lower() in ('1', 'true', 'yes')
+    app = create_app(config, offline=offline)
+    print('ADAM dashboard: http://127.0.0.1:8080')
+    uvicorn.run(app, host='127.0.0.1', port=8080, log_level='warning')

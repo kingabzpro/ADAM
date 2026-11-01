@@ -10,7 +10,7 @@ uv run adam-setup
 uv run adam
 ```
 
-`adam-setup` detects the operating system, installs or updates Ollama if needed, starts its local server, and downloads `d3:2b`. On Windows it uses native Ollama; WSL is not required. On macOS and Linux it uses Ollama's official installer, which may request administrator credentials and modify system services. The dashboard checks whether the server and model are available; use **Check model readiness** to refresh the status. The check does not run a model inference.
+`adam-setup` detects the operating system, installs or updates Ollama if needed, starts its local server, and downloads `d3:2b`. On Windows it uses native Ollama; WSL is not required. On macOS and Linux it uses Ollama's official installer, which may request administrator credentials and modify system services. The web page checks whether the server and model are available when opened; reload the page to refresh the status. The check does not run a model inference.
 
 The first forecast and news analyses download Timestral and FinBERT weights respectively. Omit either `--extra` from `uv sync` if you do not need that component. Missing forecast data prevents a trade recommendation. See [offline research](offline.md) for preparing local snapshots and model weights before disconnecting.
 
@@ -23,7 +23,7 @@ The first forecast and news analyses download Timestral and FinBERT weights resp
 
 ## Troubleshooting
 
-- **Ollama unavailable or model missing:** Run `uv run adam-setup` again and use the dashboard readiness check. If an outdated server is still running after an update, restart Ollama.
+- **Ollama unavailable or model missing:** Run `uv run adam-setup` again and reload the ADAM page to recheck readiness. If an outdated server is still running after an update, restart Ollama.
 - **Forecast or news component missing:** Run `uv sync --extra forecast --extra sentiment` from the project directory, then restart ADAM.
 - **Offline snapshot missing:** Run an online analysis for that ticker first. Offline data is research-only and always produces No Trade.
 - **Market or news source unavailable:** Retry later; external sources can rate-limit or fail. Check the individual agent errors in the dashboard.

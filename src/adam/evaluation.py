@@ -158,3 +158,27 @@ def evaluate_forecast(prices, forecaster, *, initial_window: int, horizon: int =
             'upper_quantile_coverage': float(np.mean(actual <= upper + tolerance)),
             'interval_coverage': float(np.mean((actual >= lower - tolerance) & (actual <= upper + tolerance))),
             'mean_interval_width': float(np.mean(upper - lower))}
+
+
+def main():
+    import argparse
+    import json
+    import sys
+    from pathlib import Path
+
+    from adam.history import read_history
+    from adam.market import fetch_history
+
+    parser = argparse.ArgumentParser(description='Evaluate saved risk-approved Buy analyses against later prices; hypothetical outcomes, not trades.')
+    parser.add_argument('ticker')
+    parser.add_argument('--db', default=str(Path.home() / '.adam' / 'history.sqlite'))
+    parser.add_argument('--cost-bps', type=float, default=0.0)
+    args = parser.parse_args()
+    try:
+        records = read_history(args.db, ticker=args.ticker, limit=1000)
+        prices = fetch_history(args.ticker, '1y')
+        report = evaluate_saved_buys(records, prices, ticker=args.ticker, cost_bps=args.cost_bps)
+        print(json.dumps(report, indent=2, allow_nan=False))
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        print(f'Outcome evaluation failed: {error}', file=sys.stderr)
+        raise SystemExit(1) from error

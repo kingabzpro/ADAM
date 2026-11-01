@@ -43,3 +43,47 @@ class HistoryEvaluationTests(unittest.TestCase):
                                      now=datetime(2026, 1, 5, tzinfo=timezone.utc))
         self.assertEqual(result['outcomes'][0]['status'], 'history_unavailable')
         self.assertIsNone(result['mean_return'])
+
+
+class OutcomesCliTests(unittest.TestCase):
+    def test_cli_reports_completed_saved_buy_outcomes(self):
+        import io
+        import json
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+        from pathlib import Path
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from adam.evaluation import main
+        from adam.history import record_analysis
+        from adam.risk import RiskEvidence, RiskResult
+        from test_decisions import decision
+        from test_risk import EVIDENCE, LIMITS
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 12, 1, tzinfo=timezone.utc)
+
+        now = datetime.now(timezone.utc)
+        evidence = RiskEvidence(**(EVIDENCE | {'market_time': now}))
+        market = {'as_of': now.isoformat(), 'annualized_volatility': .2, 'last_close': 100,
+                  'last_volume': 20000, 'comparison_status': 'available'}
+        result = SimpleNamespace(ticker='MSFT', agents={}, evidence={'market': market, 'forecast': {'lower_returns': [-.1]}},
+                                 decisions={'market': decision('market', 'BUY'), 'forecast': decision('forecast', 'BUY')},
+                                 risk=RiskResult(status='pass', action='BUY', reasons=()), errors={}, timeline=[],
+                                 evaluated_risk_evidence=evidence)
+        dates = pd.date_range('2026-10-01', periods=30, freq='B', tz='America/New_York')
+        prices = pd.DataFrame({'Open': [10. + index for index in range(30)],
+                               'Close': [11. + index for index in range(30)]}, index=dates)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'history.sqlite'
+            record_analysis(path, result, risk_evidence=evidence, limits=LIMITS)
+            with patch('sys.argv', ['adam-outcomes', 'MSFT', '--db', str(path)]), \
+                 patch('adam.market.fetch_history', return_value=prices), \
+                 patch('adam.evaluation.datetime', FixedDatetime), \
+                 patch('sys.stdout', new_callable=io.StringIO) as output:
+                main()
+        report = json.loads(output.getvalue())
+        self.assertEqual(report['completed_count'], 1)
+        self.assertEqual(report['outcomes'][0]['status'], 'completed')

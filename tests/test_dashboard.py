@@ -1,20 +1,12 @@
 import unittest
 
-import pandas as pd
-
-from adam.dashboard import market_rows, parse_tickers
+from adam.dashboard import format_agent, parse_risk_input, parse_tickers
 
 
 class DashboardTests(unittest.TestCase):
     def test_parse_tickers_deduplicates_and_normalizes(self):
         self.assertEqual(parse_tickers(" aapl, MSFT, AAPL ,,"), ["AAPL", "MSFT"])
 
-    def test_market_rows_show_latest_close_and_failures(self):
-        history = pd.DataFrame({"Close": [100.0, 101.5]}, index=pd.to_datetime(["2026-01-01", "2026-01-02"]))
-        rows = market_rows(["AAPL", "BAD", "EMPTY"], [history, RuntimeError("offline"), pd.DataFrame()])
-        self.assertEqual(rows[0], {"ticker": "AAPL", "date": "2026-01-02", "close": "101.50", "status": "Daily close"})
-        self.assertEqual(rows[1]["status"], "Data unavailable")
-        self.assertEqual(rows[2]["status"], "No price history")
 
 class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
     async def test_offline_news_uses_saved_evidence_without_network(self):
@@ -55,6 +47,7 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         forecast.assert_called_once_with(local_files_only=True)
         classifier.assert_not_called()
         self.assertTrue(factory.call_args.kwargs['offline'])
+
     async def test_ticker_concurrency_limits_active_analyses(self):
         import asyncio
         from unittest.mock import patch
@@ -89,18 +82,6 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
             await run_analysis(['AAPL'], 1, data_concurrency=2, ticker_concurrency=3)
         self.assertEqual(factory.call_args.kwargs['data_concurrency'], 2)
 
-    async def test_history_outcomes_use_ticker_history(self):
-        from unittest.mock import patch, sentinel
-        from adam.dashboard import saved_buy_report
-        with patch('adam.dashboard.read_history', return_value=[sentinel.record]) as read, \
-             patch('adam.dashboard.fetch_history', return_value=sentinel.prices) as fetch, \
-             patch('adam.dashboard.evaluate_saved_buys', return_value=sentinel.report) as evaluate:
-            result = await saved_buy_report('AAPL', 'history.sqlite')
-        self.assertIs(result, sentinel.report)
-        read.assert_called_once_with('history.sqlite', ticker='AAPL', limit=1000)
-        fetch.assert_called_once_with('AAPL', '1y')
-        evaluate.assert_called_once_with([sentinel.record], sentinel.prices, ticker='AAPL')
-
     async def test_analysis_rows_show_votes_and_risk(self):
         from unittest.mock import AsyncMock, patch
         from types import SimpleNamespace
@@ -123,6 +104,9 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['vote']['signal'], 'BUY')
         self.assertIn('supplied', rows[0]['risk_inputs'])
         self.assertIn('evaluated', rows[0]['risk_inputs'])
+        self.assertEqual(rows[0]['signals']['market']['signal'], 'BUY')
+        self.assertTrue(rows[0]['signals']['news']['abstained'])
+
 
 class RiskInputTests(unittest.IsolatedAsyncioTestCase):
     def test_parses_explicit_per_ticker_evidence(self):
@@ -213,6 +197,19 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0]['stage'], 'market')
         self.assertEqual(events[0]['status'], 'completed')
 
+    async def test_result_callback_receives_each_row_once(self):
+        from unittest.mock import AsyncMock, patch
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        rows = []
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, evidence={}, errors={},
+            risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)))
+        with patch('adam.dashboard.Coordinator', return_value=coordinator):
+            await run_analysis(['AAPL', 'MSFT'], 1, on_result=rows.append)
+        self.assertEqual([row['ticker'] for row in rows], ['AAPL', 'MSFT'])
+
     async def test_news_option_supplies_news_provider(self):
         from unittest.mock import AsyncMock, patch, sentinel
         from types import SimpleNamespace
@@ -255,3 +252,88 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
             rows = await run_analysis(['AAPL'], 1, history_path='ignored')
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
         self.assertIn('history: read-only', rows[0]['errors'])
+
+
+class DashboardServerTests(unittest.TestCase):
+    def make_client(self):
+        import tempfile
+        from contextlib import contextmanager
+        from pathlib import Path
+        from fastapi.testclient import TestClient
+        from adam.config import Config
+        from adam.dashboard import create_app
+
+        @contextmanager
+        def client():
+            with tempfile.TemporaryDirectory() as directory:
+                app = create_app(Config(), forecast=False, news=False,
+                                 history_path=Path(directory) / 'history.sqlite')
+                with TestClient(app) as test_client:
+                    yield test_client
+        return client()
+
+    def test_page_serves_ticker_form(self):
+        with self.make_client() as client:
+            response = client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('ADAM', response.text)
+        self.assertIn('id="tickers"', response.text)
+        self.assertIn('EventSource', response.text)
+
+    def test_health_reports_status_message(self):
+        from unittest.mock import AsyncMock, patch
+        with self.make_client() as client, \
+             patch('adam.dashboard.ollama_health', AsyncMock(return_value={'status': 'ready', 'version': '9.9', 'model': 'd3:2b'})):
+            response = client.get('/api/health')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('installed', response.json()['message'])
+
+    def test_rejects_empty_and_excessive_ticker_lists(self):
+        with self.make_client() as client:
+            self.assertEqual(client.get('/api/analysis?tickers=').status_code, 400)
+            self.assertEqual(client.get('/api/analysis?tickers=' + ','.join(f'T{i}' for i in range(21))).status_code, 400)
+
+    def test_stream_sends_events_results_and_done(self):
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from adam.risk import RiskEvidence, RiskResult
+        from test_decisions import decision
+        coordinator = AsyncMock()
+
+        async def analyze(ticker, evidence, *, on_event):
+            on_event({'time': 'now', 'ticker': ticker, 'stage': 'market', 'status': 'started'})
+            on_event({'time': 'now', 'ticker': ticker, 'stage': 'market', 'status': 'completed'})
+            return SimpleNamespace(ticker=ticker, decisions={'market': decision('market')},
+                                   agents={'market': 'completed'}, evidence={'market': {'last_close': 100}},
+                                   errors={}, timeline=[],
+                                   risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)),
+                                   evaluated_risk_evidence=RiskEvidence())
+        coordinator.analyze.side_effect = analyze
+        with self.make_client() as client, patch('adam.dashboard.Coordinator', return_value=coordinator):
+            with client.stream('GET', '/api/analysis?tickers=aapl,') as response:
+                self.assertEqual(response.status_code, 200)
+                text = '\n'.join(response.iter_lines())
+        self.assertIn('event: event', text)
+        self.assertIn('event: result', text)
+        self.assertIn('event: done', text)
+        self.assertIn('"action": "NO_TRADE"', text)
+        self.assertIn('"signal": "BUY"', text)
+        result_line = next(line for line in text.splitlines() if '"signals"' in line and line.startswith('data: {'))
+        payload = json.loads(result_line[len('data: '):])
+        self.assertEqual(payload['ticker'], 'AAPL')
+        self.assertEqual(payload['signals']['market']['signal'], 'BUY')
+        self.assertIn('market', payload['summary'])
+
+    def test_stream_reports_run_failures_as_error_event(self):
+        from unittest.mock import patch
+        with self.make_client() as client, patch('adam.dashboard.run_analysis', side_effect=RuntimeError('model exploded')):
+            with client.stream('GET', '/api/analysis?tickers=AAPL') as response:
+                text = '\n'.join(response.iter_lines())
+        self.assertIn('event: error', text)
+        self.assertIn('model exploded', text)
+        self.assertIn('event: done', text)
+
+
+if __name__ == '__main__':
+    unittest.main()
