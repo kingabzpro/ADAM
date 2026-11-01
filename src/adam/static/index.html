@@ -208,7 +208,7 @@
   .result-summary .vote-line { color: var(--muted); font-size: 12px; flex: 1; min-width: 140px; }
   .caret { color: var(--muted); font-size: 11px; transition: transform 0.2s; flex: none; }
   .result-card.open .caret { transform: rotate(90deg); }
-  .result-detail { border-top: 1px solid var(--border); padding: 6px 18px 16px; display: none; }
+  .result-detail { border-top: 1px solid var(--border); padding: 4px 14px 12px; display: none; }
   .result-card.open .result-detail { display: block; animation: card-in 0.25s ease; }
   .decision {
     display: inline-flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px;
@@ -218,22 +218,19 @@
   .decision.hold { color: var(--warn); border-color: rgba(245, 165, 36, 0.4); background: rgba(245, 165, 36, 0.1); }
   .decision.sell { color: var(--danger); border-color: rgba(244, 88, 107, 0.4); background: rgba(244, 88, 107, 0.1); }
   .decision.flat { color: #b9c1d0; border-color: var(--border-strong); background: rgba(255, 255, 255, 0.05); }
-  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin: 12px 0; }
-  .fact-card { padding: 10px 13px; border: 1px solid var(--border); border-radius: var(--r-md); background: rgba(255, 255, 255, 0.02); }
-  .fact-card .k { color: var(--muted); font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
-  .fact-card .v { font-size: 12.5px; margin-top: 3px; color: #c9d0de; overflow-wrap: anywhere; }
-  .news-item { padding: 10px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-  .news-item:last-child { border-bottom: 0; }
-  .news-item a { color: var(--info); text-decoration: none; font-weight: 600; word-break: break-all; }
-  .news-item a:hover { text-decoration: underline; }
-  .news-meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
-  .news-summary { color: #b9c1d0; font-size: 12.5px; margin-top: 4px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; margin: 10px 0; }
+  .fact-card { padding: 8px 11px; border: 1px solid var(--border); border-radius: var(--r-md); background: rgba(255, 255, 255, 0.02); }
+  .fact-card .k { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
+  .fact-card .v { font-size: 12px; margin-top: 2px; color: #c9d0de; overflow-wrap: anywhere; }
+  .fact-card .meaning { color: var(--muted); font-size: 11.5px; margin-top: 4px; line-height: 1.45; }
+  .fact-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .fact-table th { color: var(--muted); font-weight: 600; text-align: right; padding: 2px 0 2px 10px; }
+  .fact-table td { color: #c9d0de; text-align: right; padding: 2px 0 2px 10px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+  .fact-table th:first-child, .fact-table td:first-child { text-align: left; padding-left: 0; }
   .error-box {
     font-size: 12px; color: var(--danger); background: rgba(244, 88, 107, 0.08);
     border: 1px solid rgba(244, 88, 107, 0.3); border-radius: 9px; padding: 8px 12px; margin: 10px 0 0;
   }
-  .quantiles { color: #c9d0de; font-size: 12.5px; margin: 8px 0; }
-  .quantiles b { color: var(--text); }
 
 
   #toast {
@@ -365,7 +362,7 @@
     <section id="results-section" class="hidden">
       <div class="section-heading-row">
         <h2>Results</h2>
-        <span class="muted">The badge is the agents' consensus vote. Expand a ticker for evidence, quantiles, and news.</span>
+        <span class="muted">The badge is the agents' consensus vote. Expand a ticker for six blocks: market, technical, fundamentals, news, forecast, and risk.</span>
       </div>
       <div id="results-list"></div>
     </section>
@@ -612,35 +609,78 @@
     detail.className = 'result-detail';
     const grid = document.createElement('div');
     grid.className = 'grid-2';
-    Object.entries(payload.summary || {}).forEach(([name, text]) => {
+    const block = (label) => {
       const fact = document.createElement('div');
       fact.className = 'fact-card';
       const k = document.createElement('div');
       k.className = 'k';
-      k.textContent = name;
+      k.textContent = label;
+      fact.appendChild(k);
+      return fact;
+    };
+    const addMeaning = (fact, meaning) => {
+      if (!meaning) return;
+      const line = document.createElement('div');
+      line.className = 'meaning';
+      line.textContent = meaning;
+      fact.appendChild(line);
+    };
+    const BLOCK_LABELS = {market: 'Market', technical: 'Technical', fundamentals: 'Fundamentals', news: 'News'};
+    Object.entries(payload.summary || {}).forEach(([name, entry]) => {
+      if (!entry || !entry.facts) return;
+      const fact = block(BLOCK_LABELS[name] || name);
       const v = document.createElement('div');
       v.className = 'v';
-      v.textContent = text;
-      fact.appendChild(k);
+      v.textContent = entry.facts;
       fact.appendChild(v);
+      addMeaning(fact, entry.meaning);
       grid.appendChild(fact);
     });
-    detail.appendChild(grid);
-    const quantiles = forecastLine(payload.forecast);
-    if (quantiles) {
-      const line = document.createElement('p');
-      line.className = 'quantiles';
-      line.innerHTML = '<b>Forecast quantiles</b> (not guaranteed outcomes): ';
-      line.appendChild(document.createTextNode(quantiles));
-      detail.appendChild(line);
+    const forecast = payload.forecast;
+    if (forecast && (forecast.horizons || []).length) {
+      const fact = block('Forecast');
+      const table = document.createElement('table');
+      table.className = 'fact-table';
+      table.innerHTML = '<thead><tr><th>Sessions out</th><th>Median</th><th>Likely range</th></tr></thead>';
+      const body = document.createElement('tbody');
+      forecast.horizons.forEach((horizon, index) => {
+        const median = (forecast.median_returns || [])[index], lower = (forecast.lower_returns || [])[index],
+              upper = (forecast.upper_returns || [])[index];
+        if ([median, lower, upper].some((value) => typeof value !== 'number' || !isFinite(value))) return;
+        const row = document.createElement('tr');
+        [String(horizon), percent(median), percent(lower) + ' to ' + percent(upper)].forEach((cell) => {
+          const td = document.createElement('td');
+          td.textContent = cell;
+          row.appendChild(td);
+        });
+        body.appendChild(row);
+      });
+      table.appendChild(body);
+      fact.appendChild(table);
+      addMeaning(fact, 'Model output, not guaranteed outcomes; uncertainty usually grows the further out you look.');
+      grid.appendChild(fact);
     }
-    (payload.news_links || []).forEach((item) => detail.appendChild(newsItem(item)));
-    const vote = document.createElement('p');
-    vote.className = 'muted';
-    vote.textContent = 'Agents voted ' + counts.BUY + ' Buy, ' + counts.HOLD + ' Hold, ' + counts.SELL + ' Sell' +
-      (payload.vote.disagreement ? '; they disagreed, so the call defaults to Hold' : '') +
-      (payload.vote.abstained.length ? '; no signal from ' + payload.vote.abstained.join(', ') : '');
-    detail.appendChild(vote);
+    const risk = payload.risk;
+    if (risk && risk.status) {
+      const fact = block('Risk');
+      const v = document.createElement('div');
+      v.className = 'v';
+      v.textContent = risk.status === 'pass' ? 'All safety checks passed' : risk.status.replace(/_/g, ' ');
+      fact.appendChild(v);
+      const notes = {
+        pass: 'Nothing in the risk gate blocks the call.',
+        warning: 'Agents disagreed, so treat the call as low confidence.',
+        fail: 'The risk gate blocks trading this ticker.',
+        insufficient_evidence: 'Some checks had no data, so trading is blocked.'
+      };
+      let meaning = notes[risk.status] || '';
+      if (risk.status !== 'warning' && (risk.reasons || []).length) {
+        meaning = (meaning ? meaning + ' ' : '') + 'Flagged: ' + risk.reasons.join(', ') + '.';
+      }
+      addMeaning(fact, meaning);
+      grid.appendChild(fact);
+    }
+    detail.appendChild(grid);
     if (payload.errors) {
       const errors = document.createElement('div');
       errors.className = 'error-box';
@@ -649,55 +689,6 @@
     }
     card.appendChild(detail);
     return card;
-  }
-
-  function newsItem(item) {
-    const article = document.createElement('div');
-    article.className = 'news-item';
-    const title = document.createElement('div');
-    if (item.url) {
-      const link = document.createElement('a');
-      link.href = item.url;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      link.textContent = item.title;
-      title.appendChild(link);
-    } else {
-      title.textContent = item.title;
-      title.style.fontWeight = '600';
-    }
-    article.appendChild(title);
-    const meta = document.createElement('div');
-    meta.className = 'news-meta';
-    meta.textContent = (item.published || 'Date unavailable') + ' · sentiment: ' + item.sentiment;
-    if (item.sentiment === 'positive') meta.style.color = 'var(--ok)';
-    if (item.sentiment === 'negative') meta.style.color = 'var(--danger)';
-    article.appendChild(meta);
-    if (item.summary) {
-      const text = document.createElement('div');
-      text.className = 'news-summary';
-      text.textContent = item.summary;
-      article.appendChild(text);
-    }
-    (item.highlights || []).forEach((highlight) => {
-      const line = document.createElement('div');
-      line.className = 'news-summary';
-      line.textContent = highlight;
-      article.appendChild(line);
-    });
-    return article;
-  }
-
-  function forecastLine(forecast) {
-    const horizons = (forecast && forecast.horizons) || [];
-    if (!horizons.length) return null;
-    return horizons.map((horizon, index) => {
-      const median = (forecast.median_returns || [])[index], lower = (forecast.lower_returns || [])[index],
-            upper = (forecast.upper_returns || [])[index];
-      if ([median, lower, upper].some((value) => typeof value !== 'number' || !isFinite(value))) return null;
-      return 'After ' + horizon + ' session' + (horizon === 1 ? '' : 's') + ': median ' + percent(median) +
-             ', likely range ' + percent(lower) + ' to ' + percent(upper);
-    }).filter(Boolean).join('  ·  ');
   }
 
   function percent(value) { return (value > 0 ? '+' : '') + (value * 100).toFixed(1) + '%'; }

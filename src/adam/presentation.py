@@ -1,8 +1,6 @@
 """Human-readable summaries of supplied evidence, not model explanations."""
 from datetime import datetime
-from ipaddress import ip_address
 from math import isfinite
-from urllib.parse import urlsplit
 
 from adam.decisions import consensus
 
@@ -44,6 +42,7 @@ def forecast_chart(evidence):
 
 
 def evidence_summary(evidence):
+    """Facts plus a short plain-language reading per block, so a reader can follow the decision."""
     result = {}
     market = evidence.get('market', {})
     if _number(market.get('last_close')):
@@ -51,47 +50,58 @@ def evidence_summary(evidence):
         date = _session_date(market.get('as_of'))
         if date:
             text += f' on {date}'
+        meaning = None
         if _number(market.get('annualized_volatility')):
-            text += f" · annualized volatility {market['annualized_volatility']:.1%}"
-        result['market'] = text
+            volatility = market['annualized_volatility']
+            text += f" · annualized volatility {volatility:.1%}"
+            meaning = ('Volatility is high, so very large daily swings are normal.' if volatility >= .5 else
+                       'Volatility is elevated, so expect wide daily swings.' if volatility >= .3 else
+                       'Volatility is unremarkable for a stock.')
+        result['market'] = {'facts': text, 'meaning': meaning}
     technical = evidence.get('technical', {})
-    fields = []
-    if _number(technical.get('rsi_14')):
-        fields.append(f"RSI(14) {technical['rsi_14']:.1f}")
-    if _number(technical.get('sma_20')):
-        fields.append(f"20-session average ${technical['sma_20']:,.2f}")
+    fields, readings = [], []
+    rsi = technical.get('rsi_14')
+    if _number(rsi):
+        fields.append(f"RSI(14) {rsi:.1f}")
+        readings.append('RSI is oversold' if rsi <= 30 else 'RSI is overbought' if rsi >= 70 else 'RSI is neutral')
+    average = technical.get('sma_20')
+    trend = None
+    if _number(average):
+        fields.append(f"20-session average ${average:,.2f}")
+        if _number(market.get('last_close')):
+            trend = 'above' if market['last_close'] > average else 'below'
+            readings.append(f"price sits {trend} its 20-session average")
     if fields:
-        result['technical'] = ' · '.join(fields)
+        meaning = None
+        if readings:
+            direction = 'up' if trend == 'above' else 'down' if trend == 'below' else None
+            head = readings[0] if len(readings) == 1 else ' and '.join(readings)
+            meaning = head + (f", so the short-term trend points {direction}" if direction else '') + '.'
+        result['technical'] = {'facts': ' · '.join(fields), 'meaning': meaning}
     fundamentals = evidence.get('fundamentals', {})
     growth = fundamentals.get('metrics', {}).get('revenue_growth')
     if _number(growth):
         freshness = {'current': 'fiscal data is current', 'stale': 'fiscal data is stale'}.get(
             fundamentals.get('freshness'), 'fiscal quarter date is unknown')
-        result['fundamentals'] = f'Revenue growth {growth:+.1%} · {freshness}'
+        result['fundamentals'] = {'facts': f'Revenue growth {growth:+.1%} · {freshness}',
+                                  'meaning': ('Revenue is expanding quickly.' if growth >= .2 else
+                                              'Revenue is shrinking.' if growth < 0 else
+                                              'Revenue is growing modestly.')}
     news = evidence.get('news', {})
     if news.get('basis') in ('articles', 'headlines'):
         basis = news['basis']
-        result['news'] = f"{len(news.get(basis, []))} {basis} scored · coverage and relevance are limited"
+        items = news.get(basis, [])
+        labels = [(item.get('sentiment') or {}).get('label') for item in items if isinstance(item, dict)]
+        positive, negative = labels.count('positive'), labels.count('negative')
+        if len(items) < 3:
+            meaning = 'Only a few stories were scored, so news adds little signal today.'
+        else:
+            lean = 'lean positive' if positive > negative else 'lean negative' if negative > positive else 'are mixed'
+            meaning = f'Headlines {lean}, though coverage stays limited.'
+        breakdown = [f'{count} {name}' for name, count in
+                     (('positive', positive), ('negative', negative), ('neutral', labels.count('neutral'))) if count]
+        facts = f"{len(items)} {basis[:-1] if len(items) == 1 else basis} scored"
+        if breakdown:
+            facts += ' · ' + ', '.join(breakdown)
+        result['news'] = {'facts': facts, 'meaning': meaning}
     return result
-
-
-def safe_news_link(value):
-    if not isinstance(value, str) or any(ord(character) < 32 or ord(character) == 127 for character in value):
-        return None
-    try:
-        url = urlsplit(value)
-        host = url.hostname
-        if url.scheme not in ('https', 'http') or not host or url.username is not None or url.password is not None:
-            return None
-        _ = url.port
-        host = host.rstrip('.')
-        if host == 'localhost' or host.endswith(('.localhost', '.local')):
-            return None
-        try:
-            if not ip_address(host).is_global:
-                return None
-        except ValueError:
-            pass
-        return value
-    except ValueError:
-        return None

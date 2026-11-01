@@ -14,7 +14,7 @@ from adam.forecast import shared_forecaster
 from adam.health import health_message, ollama_health
 from adam.history import record_analysis
 from adam.news import news_evidence
-from adam.presentation import evidence_summary, safe_news_link, vote_summary
+from adam.presentation import evidence_summary, vote_summary
 from adam.risk import RiskEvidence, RiskLimits
 from adam.sentiment import shared_classifier
 from adam.snapshots import read_news
@@ -121,6 +121,7 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
             row = {"ticker": ticker, "agents": "; ".join(agents), "vote": vote, "vote_display": vote_display,
                    "signals": agent_signals(result),
                    "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
+                   "risk_status": result.risk.status, "risk_reasons": list(result.risk.reasons),
                    "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
                    "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
             if on_result is not None:
@@ -135,18 +136,13 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
 
 
 def result_payload(row: dict) -> dict:
-    news = row['evidence'].get('news') or {}
-    links = []
-    for item in news.get(news.get('basis', ''), []):
-        links.append({'title': item.get('title', 'News'), 'url': safe_news_link(item.get('url')),
-                      'published': item.get('published'), 'sentiment': (item.get('sentiment') or {}).get('label', 'unavailable'),
-                      'summary': item.get('summary'), 'highlights': item.get('financial_highlights', [])})
     forecast = row['evidence'].get('forecast') or {}
     quantiles = {name: forecast.get(name) for name in
                  ('horizons', 'lower_returns', 'median_returns', 'upper_returns')}
     return {'ticker': row['ticker'], 'agents': row['agents'], 'signals': row['signals'], 'vote': row['vote'],
             'vote_display': row['vote_display'], 'errors': row['errors'],
-            'summary': evidence_summary(row['evidence']), 'forecast': quantiles, 'news_links': links}
+            'summary': evidence_summary(row['evidence']), 'forecast': quantiles,
+            'risk': {'status': row['risk_status'], 'reasons': row['risk_reasons']}}
 
 
 def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, history_path=HISTORY_PATH,
