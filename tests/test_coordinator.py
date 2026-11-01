@@ -89,3 +89,25 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence(**EVIDENCE))
         self.assertEqual(result.risk.action, 'NO_TRADE')
         self.assertIn('forecast_decision', result.risk.reasons)
+
+    async def test_emits_progress_and_records_risk_outcome(self):
+        events = []
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence(), on_event=events.append)
+        self.assertEqual(events, result.timeline)
+        self.assertTrue(any(event['stage'] == 'market' and event['status'] == 'completed' for event in events))
+        self.assertTrue(any(event['stage'] == 'fundamentals' and event['status'] == 'failed' for event in events))
+        self.assertEqual(events[-1]['stage'], 'risk')
+        self.assertEqual(events[-1]['status'], 'NO_TRADE')
+        self.assertTrue(all(event['ticker'] == 'AAPL' and event['time'].endswith('+00:00') for event in events))
+
+    async def test_bad_event_callback_does_not_change_risk_result(self):
+        def broken(event):
+            raise RuntimeError('viewer disconnected')
+        with patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            with self.assertLogs(level='ERROR'):
+                result = await Coordinator(AsyncMock(), None).analyze('AAPL', RiskEvidence(), on_event=broken)
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertEqual(result.timeline[-1]['stage'], 'risk')

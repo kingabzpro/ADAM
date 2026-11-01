@@ -1,4 +1,6 @@
 import asyncio
+import logging
+from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from adam.decisions import Decision, consensus
@@ -16,6 +18,7 @@ class AnalysisResult:
     decisions: dict[str, Decision]
     risk: RiskResult
     errors: dict[str, str]
+    timeline: list[dict[str, str]]
 
 
 class Coordinator:
@@ -28,15 +31,27 @@ class Coordinator:
         self.inference_slots = asyncio.Semaphore(inference_concurrency)
         self.forecast_slot = asyncio.Semaphore(1)
 
-    async def analyze(self, ticker: str, risk_evidence: RiskEvidence, *, horizon: int = 5) -> AnalysisResult:
+    async def analyze(self, ticker: str, risk_evidence: RiskEvidence, *, horizon: int = 5, on_event=None) -> AnalysisResult:
         ticker = ticker.strip().upper()
         if not ticker:
             raise ValueError("Ticker is required")
         agents = {name: "unavailable" for name in ("market", "technical", "forecast", "news", "fundamentals")}
         decisions = {}
         errors = {}
+        timeline = []
+
+        def emit(stage, status):
+            event = {'time': datetime.now(timezone.utc).isoformat(), 'ticker': ticker,
+                     'stage': stage, 'status': status}
+            timeline.append(event)
+            if on_event is not None:
+                try:
+                    on_event(event.copy())
+                except Exception:
+                    logging.exception('Analysis event callback failed')
 
         async def run(name, compute):
+            emit(name, "started")
             try:
                 evidence = await compute()
                 async with self.inference_slots:
@@ -45,9 +60,11 @@ class Coordinator:
                     raise ValueError("Mismatched agent response")
                 decisions[name] = result
                 agents[name] = "completed"
+                emit(name, "completed")
             except Exception as error:
                 agents[name] = "failed"
                 errors[name] = str(error)
+                emit(name, "failed")
 
         async def fundamentals():
             info = await asyncio.to_thread(fetch_fundamentals, ticker)
@@ -57,14 +74,18 @@ class Coordinator:
             return evidence
 
         async def market_stream():
+            emit("market_data", "started")
             try:
                 history = await asyncio.to_thread(fetch_history, ticker, "3mo")
             except Exception as error:
                 errors["market_data"] = str(error)
+                emit("market_data", "failed")
                 agents["market"] = agents["technical"] = "failed"
                 if self.forecaster is not None:
                     agents["forecast"] = "failed"
                 return
+
+            emit("market_data", "completed")
 
             async def market():
                 return await asyncio.to_thread(market_evidence, history)
@@ -89,4 +110,5 @@ class Coordinator:
         if missing_critical and result.status != "fail":
             result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
                                 reasons=result.reasons + missing_critical)
-        return AnalysisResult(ticker, agents, decisions, result, errors)
+        emit("risk", result.action)
+        return AnalysisResult(ticker, agents, decisions, result, errors, timeline)
