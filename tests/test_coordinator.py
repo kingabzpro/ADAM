@@ -10,6 +10,9 @@ from test_technical import history
 
 class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        from adam import cache
+        cache.clear()
+        self.addCleanup(cache.clear)
         self.patch_fundamentals = patch('adam.coordinator.fetch_fundamentals', side_effect=RuntimeError('unavailable'))
         self.patch_fundamentals.start()
         self.addCleanup(self.patch_fundamentals.stop)
@@ -337,13 +340,14 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([result.agents['market'] for result in results], ['completed', 'completed'])
 
     async def test_benchmark_cache_expires_and_failed_requests_retry(self):
+        from adam import cache
         frame = history([100.] * 40)
-        coordinator = Coordinator(AsyncMock(), None)
+        coordinator = Coordinator(AsyncMock(), None, cache_ttl_seconds=900)
         with patch('adam.coordinator.fetch_history', return_value=frame) as fetch:
             self.assertIs(await coordinator.benchmark_history(), frame)
             self.assertIs(await coordinator.benchmark_history(), frame)
             self.assertEqual(fetch.call_count, 1)
-            coordinator._benchmark_started -= 61
+            cache.clear()
             self.assertIs(await coordinator.benchmark_history(), frame)
             self.assertEqual(fetch.call_count, 2)
         coordinator = Coordinator(AsyncMock(), None)
@@ -366,6 +370,115 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.risk.action, 'NO_TRADE')
         self.assertIn('market_time', result.risk.reasons)
         self.assertLess(result.evaluated_risk_evidence.market_time, current)
+
+    async def test_repeat_analysis_reuses_cached_decision(self):
+        from datetime import datetime, timezone
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        info = {'revenueGrowth': 0.1, 'mostRecentQuarter': int(datetime.now(timezone.utc).timestamp())}
+        coordinator = Coordinator(model, LIMITS, cache_ttl_seconds=900)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)) as fetch, \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info):
+            first = await coordinator.analyze('AAPL', RiskEvidence())
+            second = await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertEqual(fetch.call_count, 2)
+        self.assertEqual(model.assess.await_count, 3)
+        self.assertEqual(second.agents, first.agents)
+        self.assertEqual(second.decisions, first.decisions)
+        self.assertEqual(second.evidence, first.evidence)
+        self.assertIn('cache', [event['stage'] for event in second.timeline])
+
+    async def test_cached_decision_recomputes_risk_with_current_limits(self):
+        from datetime import datetime, timezone
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        info = {'revenueGrowth': 0.1, 'mostRecentQuarter': int(datetime.now(timezone.utc).timestamp())}
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info):
+            unrestricted = await Coordinator(model, None, cache_ttl_seconds=900).analyze('AAPL', RiskEvidence())
+            limited = await Coordinator(model, LIMITS, cache_ttl_seconds=900).analyze('AAPL', RiskEvidence())
+        self.assertEqual(unrestricted.risk.status, 'insufficient_evidence')
+        self.assertEqual(limited.risk.status, 'fail')
+        self.assertEqual(limited.decisions, unrestricted.decisions)
+
+    async def test_disabled_cache_refetches_every_run(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        coordinator = Coordinator(model, None)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)) as fetch:
+            await coordinator.analyze('AAPL', RiskEvidence())
+            await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertEqual(fetch.call_count, 4)
+
+    async def test_online_analysis_serves_fresh_snapshots_without_network(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from adam.snapshots import save_fundamentals, save_prices
+        prices = history([100.] * 40)
+        prices['Open'] = 100.
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', side_effect=AssertionError('network')), \
+             patch('adam.coordinator.fetch_fundamentals', side_effect=AssertionError('network')):
+            for ticker in ('AAPL', 'SPY'):
+                save_prices(directory, ticker, prices)
+            save_fundamentals(directory, 'AAPL', {'revenueGrowth': .1, 'mostRecentQuarter': datetime.now(timezone.utc).timestamp()})
+            coordinator = Coordinator(model, None, cache_ttl_seconds=900, snapshot_directory=directory)
+            result = await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['market'], 'completed')
+        self.assertEqual(result.agents['technical'], 'completed')
+        self.assertEqual(result.agents['fundamentals'], 'completed')
+        self.assertEqual(result.evidence['market']['comparison_status'], 'available')
+
+    async def test_stale_snapshot_is_refetched(self):
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import Mock
+        from adam.snapshots import save_prices
+        prices = history([100.] * 40)
+        prices['Open'] = 100.
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        real_datetime = datetime
+        clock = Mock()
+        clock.now.return_value = real_datetime.now(timezone.utc) + timedelta(seconds=901)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', return_value=prices) as fetch, \
+             patch('adam.coordinator.datetime', clock):
+            save_prices(directory, 'AAPL', prices)
+            result = await Coordinator(model, None, cache_ttl_seconds=900, snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['market'], 'completed')
+        self.assertEqual(fetch.call_count, 2)
+
+    async def test_fundamentals_failure_does_not_lose_prices(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), \
+             patch('adam.coordinator.fetch_fundamentals', side_effect=RuntimeError('quote failed')):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['market'], 'completed')
+        self.assertEqual(result.agents['technical'], 'completed')
+        self.assertEqual(result.agents['fundamentals'], 'failed')
+        self.assertEqual(result.errors['fundamentals'], 'quote failed')
+
+    async def test_news_evidence_is_cached_across_runs(self):
+        from datetime import datetime, timezone
+        evidence = {'basis': 'headlines',
+                    'headlines': [{'title': 'AAPL results', 'published': datetime.now(timezone.utc).isoformat(),
+                                   'sentiment': {'label': 'positive'}}],
+                    'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}}
+        provider = AsyncMock(return_value=evidence)
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        coordinator = Coordinator(model, None, news_provider=provider, cache_ttl_seconds=900)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            # The fundamentals failure from setUp keeps the decision cache out of play,
+            # so both runs run inference while the news evidence itself is fetched once.
+            await coordinator.analyze('AAPL', RiskEvidence())
+            await coordinator.analyze('AAPL', RiskEvidence())
+        provider.assert_awaited_once()
+        self.assertEqual(model.assess.await_count, 6)
 
     async def test_coordinator_risk_uses_observed_volatility_liquidity_and_forecast(self):
         from datetime import datetime, timezone

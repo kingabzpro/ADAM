@@ -33,6 +33,19 @@ class ConfigTests(unittest.TestCase):
             path.write_text("inference_concurrency: 2\n", encoding="utf-8")
             self.assertEqual(load_config(path).inference_concurrency, 2)
 
+    def test_loads_cache_ttl_seconds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'config.yaml'
+            path.write_text('cache_ttl_seconds: 300\n', encoding='utf-8')
+            self.assertEqual(load_config(path).cache_ttl_seconds, 300)
+
+    def test_rejects_non_positive_cache_ttl(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'config.yaml'
+            path.write_text('cache_ttl_seconds: 0\n', encoding='utf-8')
+            with self.assertRaises(ValueError):
+                load_config(path)
+
     def test_rejects_non_positive_concurrency(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "config.yaml"

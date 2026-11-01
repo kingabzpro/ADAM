@@ -181,6 +181,44 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('market: BUY', rows[0]['agents'])
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
 
+    async def test_news_uses_one_shared_client_per_run(self):
+        import httpx
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+        from adam.dashboard import run_analysis
+        from test_technical import history
+        calls = []
+        shared = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json={'answers': {'signal': {'choice': 'BUY', 'probabilities': {'BUY': 0.7, 'HOLD': 0.2, 'SELL': 0.1}}}})))
+        created = []
+
+        def make_client(**kwargs):
+            created.append(kwargs)
+            return shared
+
+        seen = []
+
+        async def news_evidence_stub(ticker, client, classifier):
+            seen.append(client)
+            return {'basis': 'headlines',
+                    'headlines': [{'title': 'AAPL in the news', 'published': datetime.now(timezone.utc).isoformat(),
+                                   'sentiment': {'label': 'positive'}}],
+                    'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}}
+
+        info = {'revenueGrowth': 0.1, 'mostRecentQuarter': int(datetime.now(timezone.utc).timestamp())}
+        with patch('adam.dashboard.httpx.AsyncClient', side_effect=make_client), \
+             patch('adam.dashboard.news_evidence', news_evidence_stub), \
+             patch('adam.dashboard.shared_classifier', return_value=object()), \
+             patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)), \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info):
+            rows = await run_analysis(['AAPL', 'MSFT'], 2, news=True)
+        self.assertEqual(len(created), 2)
+        self.assertEqual(created[0]['timeout'], 180)
+        self.assertEqual(created[1]['timeout'], 30)
+        self.assertEqual(len(seen), 2)
+        self.assertIs(seen[0], seen[1])
+        self.assertEqual({row['action'] for row in rows}, {'NO_TRADE'})
+
     async def test_dashboard_forwards_progress_events(self):
         from unittest.mock import AsyncMock, patch
         from types import SimpleNamespace

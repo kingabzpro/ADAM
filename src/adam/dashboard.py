@@ -74,26 +74,27 @@ def agent_signals(result) -> dict:
     return signals
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, on_result=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None) -> list[dict]:
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, on_result=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None, cache_ttl_seconds=0) -> list[dict]:
     if type(ticker_concurrency) is not int or ticker_concurrency < 1:
         raise ValueError('ticker_concurrency must be a positive integer')
     async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
         forecaster = (await asyncio.to_thread(shared_forecaster, local_files_only=True) if offline
                       else await asyncio.to_thread(shared_forecaster)) if forecast else None
         classifier = await asyncio.to_thread(shared_classifier) if news and not offline else None
+        news_http = httpx.AsyncClient(timeout=30, trust_env=False) if news and not offline else None
 
         async def news_provider(ticker):
             if offline:
                 evidence, saved = await asyncio.to_thread(read_news, snapshot_directory, ticker)
                 evidence.update(source='local snapshot', snapshot_saved_at=saved.isoformat())
                 return evidence
-            async with httpx.AsyncClient(timeout=30, trust_env=False) as news_http:
-                return await news_evidence(ticker, news_http, classifier)
+            return await news_evidence(ticker, news_http, classifier)
 
         coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster,
                                   news_provider=news_provider if news else None,
                                   inference_concurrency=inference_concurrency, data_concurrency=data_concurrency,
-                                  offline=offline, snapshot_directory=snapshot_directory)
+                                  offline=offline, snapshot_directory=snapshot_directory,
+                                  cache_ttl_seconds=cache_ttl_seconds)
         ticker_slots = asyncio.Semaphore(ticker_concurrency)
 
         async def analyze(ticker):
@@ -124,7 +125,11 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
                 on_result(row)
             return row
 
-        return list(await asyncio.gather(*(analyze(ticker) for ticker in tickers)))
+        try:
+            return list(await asyncio.gather(*(analyze(ticker) for ticker in tickers)))
+        finally:
+            if news_http is not None:
+                await news_http.aclose()
 
 
 def result_payload(row: dict) -> dict:
@@ -180,7 +185,8 @@ def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, 
                                    news=news, on_event=on_event, on_result=on_result, history_path=history_path,
                                    data_concurrency=config.data_concurrency,
                                    ticker_concurrency=config.ticker_concurrency, offline=offline,
-                                   snapshot_directory=snapshot_directory)
+                                   snapshot_directory=snapshot_directory,
+                                   cache_ttl_seconds=config.cache_ttl_seconds)
             except Exception as error:
                 queue.put_nowait(('error', {'message': str(error)}))
             finally:

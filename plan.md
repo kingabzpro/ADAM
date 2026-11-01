@@ -653,7 +653,8 @@ adam/
 - [ ] Optimize CPU thread consumption.
 - [ ] Reduce duplicate model loading.
 - [ ] Add request deduplication.
-  - Concurrent price and fundamentals requests for the same ticker are shared within a coordinator; other request types remain independent.
+  - Prices and fundamentals load in one combined fetch per ticker, and concurrent requests for the same ticker share one in-flight call.
+  - Prices, fundamentals, news, and completed decisions are cached process-wide with a configurable TTL, and snapshots saved within the window are reused after a restart; the short-lived SPY benchmark cache was replaced by the same cache. Measured repeat-run latency remains outstanding.
 - [ ] Measure p50/p95/p99 decision latency.
 - [ ] Test concurrent workloads across multiple tickers.
   - Added a bounded live coordinator benchmark. On Windows, a 20-ticker run at concurrency 4 completed 18 tickers; two encountered Yahoo connection failures. Successful ticker latency was p50 22.7s, p95 46.3s, p99 51.3s, including network time. Forecast and news coverage and repeat measurements remain outstanding.

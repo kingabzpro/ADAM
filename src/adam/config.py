@@ -11,6 +11,7 @@ class Config:
     data_concurrency: int = 4
     ticker_concurrency: int = 4
     yahoo_interval_seconds: float = .25
+    cache_ttl_seconds: int = 900
 
 
 def load_config(path: Path | None) -> Config:
