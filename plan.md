@@ -637,6 +637,7 @@ adam/
   - The coordinator derives conservative market freshness, volatility, liquidity proxy, and forecast downside; portfolio exposure and trading costs still require supplied evidence.
 - [x] Add signal disagreement detection.
 - [ ] Show decision scores and explanations.
+  - The dashboard shows scores, pre-risk vote counts, selected evidence, forecast quantiles, and news links. D3 does not produce causal explanations; richer evidence presentation remains outstanding.
 - [ ] Add article summaries and financial highlights.
 - [ ] Implement live event streaming.
 - [ ] Add full decision timeline.

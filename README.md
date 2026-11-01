@@ -22,6 +22,8 @@ Setup detects Windows, macOS, or Linux, installs or updates [Ollama](https://oll
 
 Enter ticker symbols in the dashboard, select the evidence streams you want, and run analysis. Configure your own limits and per-ticker inputs using the [risk input guide](docs/risk-input.md); missing critical inputs produce **No Trade**. Analysis history and supplied risk inputs are stored locally in `~/.adam/history.sqlite`.
 
+Expand a ticker's evidence to see the vote breakdown, forecast quantiles, news sources, and risk inputs. D3 provides choice scores, not a causal explanation.
+
 Concurrency settings are optional; see the [configuration guide](docs/configuration.md).
 For platform requirements and troubleshooting, see the [installation guide](docs/install.md).
 

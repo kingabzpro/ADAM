@@ -119,6 +119,8 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
         self.assertIn('risk_limits', rows[0]['risk'])
         self.assertEqual(rows[0]['evidence']['market']['last_close'], 100)
+        self.assertEqual(rows[0]['vote']['counts'], {'BUY': 1, 'HOLD': 0, 'SELL': 0})
+        self.assertEqual(rows[0]['vote']['signal'], 'BUY')
         self.assertIn('supplied', rows[0]['risk_inputs'])
         self.assertIn('evaluated', rows[0]['risk_inputs'])
 

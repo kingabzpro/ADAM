@@ -13,6 +13,7 @@ from adam.forecast import shared_forecaster
 from adam.health import health_message, ollama_health
 from adam.history import record_analysis, read_history
 from adam.news import news_evidence
+from adam.presentation import evidence_summary, forecast_chart, safe_news_link, vote_summary
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
 from adam.snapshots import read_news, read_prices
@@ -112,7 +113,11 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
                 agents.append(format_agent(name, status, decision))
             evaluated = getattr(result, 'evaluated_risk_evidence', ticker_evidence)
             risk_inputs = {'supplied': ticker_evidence.model_dump(mode='json'), 'evaluated': evaluated.model_dump(mode='json')}
-            return {"ticker": ticker, "agents": "; ".join(agents), "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
+            vote = vote_summary(list(result.decisions.values()))
+            counts = vote['counts']
+            vote_display = f"{vote['signal'] or 'No consensus'}: BUY {counts['BUY']}, HOLD {counts['HOLD']}, SELL {counts['SELL']}"
+            return {"ticker": ticker, "agents": "; ".join(agents), "vote": vote, "vote_display": vote_display,
+                    "evidence": result.evidence, "risk_inputs": risk_inputs, "action": result.risk.action,
                     "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
                     "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
 
@@ -176,6 +181,7 @@ def dashboard(config) -> None:
     analysis_table = ui.table(columns=[
         {"name": "ticker", "label": "Ticker", "field": "ticker"},
         {"name": "agents", "label": "Agent signals and model scores", "field": "agents"},
+        {"name": "vote_display", "label": "Consensus before risk", "field": "vote_display"},
         {"name": "action", "label": "Risk-gated result", "field": "action"},
         {"name": "risk", "label": "Risk status", "field": "risk"},
         {"name": "errors", "label": "Errors", "field": "errors"},
@@ -203,7 +209,29 @@ def dashboard(config) -> None:
             with evidence_details:
                 for row in analysis_table.rows:
                     with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):
-                        ui.code(json.dumps(row['evidence'], indent=2, ensure_ascii=False), language='json').classes('w-full')
+                        ui.label('D3 supplies choice scores, not a causal explanation. These are selected input facts.')
+                        for name, text in evidence_summary(row['evidence']).items():
+                            ui.label(f'{name.title()}: {text}')
+                        vote = row['vote']
+                        ui.label(f"{row['vote_display']}; disagreement: {'yes' if vote['disagreement'] else 'no'}; abstained decisions: {', '.join(vote['abstained']) or 'none'}")
+                        chart = forecast_chart(row['evidence'].get('forecast', {}))
+                        if chart is not None:
+                            ui.label('Forecast return quantiles, not guaranteed outcomes')
+                            ui.echart(chart).classes('w-full h-72')
+                        news = row['evidence'].get('news', {})
+                        for item in news.get(news.get('basis', ''), []):
+                            target = safe_news_link(item.get('url'))
+                            if target:
+                                ui.link(item.get('title', 'News'), target, new_tab=True).props('rel="noopener noreferrer"')
+                            else:
+                                ui.label(item.get('title', 'News'))
+                            ui.label(f"{item.get('published') or 'Date unavailable'} · sentiment: {item.get('sentiment', {}).get('label', 'unavailable')}")
+                            if item.get('summary'):
+                                ui.label(item['summary'])
+                            for highlight in item.get('financial_highlights', []):
+                                ui.label(highlight)
+                        with ui.expansion('Raw agent evidence').classes('w-full'):
+                            ui.code(json.dumps(row['evidence'], indent=2, ensure_ascii=False), language='json').classes('w-full')
                         ui.label('Supplied and evaluated risk inputs')
                         ui.code(json.dumps(row['risk_inputs'], indent=2, ensure_ascii=False), language='json').classes('w-full')
             analysis_status.text = "Model scores are not probabilities of profit."
