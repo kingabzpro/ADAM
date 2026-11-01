@@ -275,7 +275,7 @@ def compact_news_evidence(evidence):
                               'financial_highlights': [s for s in item.get('financial_highlights', []) if len(s) <= 180][:1]}
                              for item in evidence['articles'][:5]],
                 'mean_scores': {name: round(value, 4) for name, value in evidence['mean_scores'].items()},
-                'note': 'Limited publisher coverage; text and chunks may be truncated. Ticker mention does not guarantee relevance.'}
+                'note': ('Cached historical news. ' if evidence.get('source') == 'local snapshot' else '') + 'Limited publisher coverage; text and chunks may be truncated. Ticker mention does not guarantee relevance.'}
     # shortcut: D3 sees at most 10 shortened titles; increase after context budgeting is measured.
     headlines = evidence['headlines']
     return {
@@ -286,5 +286,5 @@ def compact_news_evidence(evidence):
                        'sentiment': item.get('sentiment', {}).get('label')}
                       for item in headlines[:10]],
         'mean_scores': {name: round(value, 4) for name, value in evidence['mean_scores'].items()},
-        'note': 'Headline sentiment only; search results may be unrelated. The aggregate covers all scored headlines; titles shown are limited and may be shortened.',
+        'note': ('Cached historical news. ' if evidence.get('source') == 'local snapshot' else '') + 'Headline sentiment only; search results may be unrelated. The aggregate covers all scored headlines; titles shown are limited and may be shortened.',
     }

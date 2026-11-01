@@ -96,3 +96,43 @@ def read_fundamentals(directory, ticker):
     if not isinstance(data, dict) or set(data) - {*FIELDS.values(), 'mostRecentQuarter'}:
         raise ValueError('Invalid fundamentals snapshot')
     return data, saved_at
+
+
+def _validated_news(data):
+    from math import isclose, isfinite
+
+    if not isinstance(data, dict) or data.get('basis') not in ('articles', 'headlines'):
+        raise ValueError('Invalid news snapshot')
+    items = data.get(data['basis'])
+    scores = data.get('mean_scores')
+    labels = {'positive', 'neutral', 'negative'}
+    if (not isinstance(items, list) or not 1 <= len(items) <= 20 or not isinstance(scores, dict)
+            or set(scores) != labels or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                                              or not isfinite(v) or not 0 <= v <= 1 for v in scores.values())
+            or not isclose(sum(scores.values()), 1, abs_tol=1e-5)):
+        raise ValueError('Invalid news snapshot scores')
+    for item in items:
+        if (not isinstance(item, dict) or not isinstance(item.get('title'), str) or not item['title'].strip()
+                or not isinstance(item.get('sentiment'), dict) or item['sentiment'].get('label') not in labels
+                or not isinstance(item.get('summary', ''), str)
+                or not isinstance(item.get('financial_highlights', []), list)
+                or any(not isinstance(value, str) for value in item.get('financial_highlights', []))):
+            raise ValueError('Invalid news snapshot item')
+        try:
+            date = datetime.fromisoformat(item.get('published') or '')
+        except (ValueError, TypeError) as error:
+            raise ValueError('Invalid news publication time') from error
+        if date.tzinfo is None or date.utcoffset() is None or date > datetime.now(timezone.utc):
+            raise ValueError('Invalid news publication time')
+    if len(json.dumps(data, allow_nan=False)) > 1_000_000:
+        raise ValueError('News snapshot is too large')
+    return data
+
+
+def save_news(directory, ticker, evidence):
+    _write(directory, ticker, 'news', _validated_news(evidence))
+
+
+def read_news(directory, ticker):
+    data, saved_at = _read(directory, ticker, 'news')
+    return _validated_news(data), saved_at

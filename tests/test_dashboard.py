@@ -17,7 +17,30 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(rows[2]["status"], "No price history")
 
 class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
-    async def test_offline_uses_cached_forecaster_and_disallows_network_news(self):
+    async def test_offline_news_uses_saved_evidence_without_network(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from unittest.mock import AsyncMock, patch
+        from adam.dashboard import run_analysis
+        from adam.snapshots import save_news
+        from test_decisions import decision
+        evidence = {'basis': 'headlines', 'headlines': [{'title': 'AAPL results',
+                    'published': datetime.now(timezone.utc).isoformat(), 'sentiment': {'label': 'positive'}}],
+                    'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}}
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory:
+            save_news(directory, 'AAPL', evidence)
+            with patch('adam.dashboard.D3Client', return_value=model), \
+                 patch('adam.dashboard.news_evidence', side_effect=AssertionError('network')), \
+                 patch('adam.dashboard.shared_classifier', side_effect=AssertionError('model download')):
+                rows = await run_analysis(['AAPL'], 1, news=True, offline=True, snapshot_directory=directory)
+        self.assertIn('news: BUY', rows[0]['agents'])
+        self.assertIn('[abstained]', rows[0]['agents'])
+        self.assertEqual(rows[0]['evidence']['news']['source'], 'local snapshot')
+        self.assertEqual(rows[0]['action'], 'NO_TRADE')
+
+    async def test_offline_uses_cached_forecaster_without_loading_sentiment(self):
         from unittest.mock import AsyncMock, patch, sentinel
         from types import SimpleNamespace
         from adam.dashboard import run_analysis
@@ -26,12 +49,12 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, evidence={}, errors={},
             risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('offline_snapshot',)))
         with patch('adam.dashboard.Coordinator', return_value=coordinator) as factory, \
-             patch('adam.dashboard.shared_forecaster', return_value=sentinel.forecaster) as forecast:
-            await run_analysis(['AAPL'], 1, forecast=True, offline=True, snapshot_directory='cache')
+             patch('adam.dashboard.shared_forecaster', return_value=sentinel.forecaster) as forecast, \
+             patch('adam.dashboard.shared_classifier') as classifier:
+            await run_analysis(['AAPL'], 1, forecast=True, news=True, offline=True, snapshot_directory='cache')
         forecast.assert_called_once_with(local_files_only=True)
+        classifier.assert_not_called()
         self.assertTrue(factory.call_args.kwargs['offline'])
-        with self.assertRaises(ValueError):
-            await run_analysis(['AAPL'], 1, offline=True, news=True, snapshot_directory='cache')
     async def test_ticker_concurrency_limits_active_analyses(self):
         import asyncio
         from unittest.mock import patch

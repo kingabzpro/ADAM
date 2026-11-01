@@ -668,7 +668,7 @@ adam/
 - [ ] Finalize one-command installation.
 - [ ] Document GPU and CPU requirements.
 - [ ] Add offline operation.
-  - Added snapshot-based offline research with cached Timestral and mandatory No Trade; validated on Windows with external socket connections blocked. Cross-platform live validation and offline news remain outstanding.
+  - Added snapshot-based offline research with cached news, cached Timestral, and mandatory No Trade; validated on Windows with external socket connections blocked. Cross-platform live validation remains outstanding.
 - [ ] Publish installation and development guides.
 - [ ] Add optional Docker Compose packaging.
 

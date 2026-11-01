@@ -14,7 +14,7 @@ from adam.history import record_analysis, read_history
 from adam.news import news_evidence
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
-from adam.snapshots import read_prices
+from adam.snapshots import read_news, read_prices
 
 from adam.market import fetch_history, fetch_many
 
@@ -76,14 +76,16 @@ def format_agent(name, status, decision):
 async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None) -> list[dict]:
     if type(ticker_concurrency) is not int or ticker_concurrency < 1:
         raise ValueError('ticker_concurrency must be a positive integer')
-    if offline and news:
-        raise ValueError('News is unavailable in offline mode')
     async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
         forecaster = (await asyncio.to_thread(shared_forecaster, local_files_only=True) if offline
                       else await asyncio.to_thread(shared_forecaster)) if forecast else None
-        classifier = await asyncio.to_thread(shared_classifier) if news else None
+        classifier = await asyncio.to_thread(shared_classifier) if news and not offline else None
 
         async def news_provider(ticker):
+            if offline:
+                evidence, saved = await asyncio.to_thread(read_news, snapshot_directory, ticker)
+                evidence.update(source='local snapshot', snapshot_saved_at=saved.isoformat())
+                return evidence
             async with httpx.AsyncClient(timeout=30, trust_env=False) as news_http:
                 return await news_evidence(ticker, news_http, classifier)
 
@@ -119,7 +121,7 @@ def dashboard(config) -> None:
     ui.label("Local market research and decision support")
     ui.label("Research signals are preliminary. No Trade is returned until risk limits and evidence are configured.")
     snapshot_directory = Path.home() / '.adam' / 'snapshots'
-    offline_toggle = ui.checkbox('Offline: use saved snapshots, disable news, always No Trade', value=False)
+    offline_toggle = ui.checkbox('Offline: use saved snapshots, always No Trade', value=False)
     tickers = ui.input("Tickers, separated by commas", value="AAPL, MSFT")
     status = ui.label()
     table = ui.table(columns=[

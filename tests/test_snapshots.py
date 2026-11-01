@@ -5,11 +5,23 @@ from pathlib import Path
 
 import pandas as pd
 
-from adam.snapshots import read_prices, read_fundamentals, save_prices, save_fundamentals
+from adam.snapshots import read_prices, read_fundamentals, save_prices, save_fundamentals, read_news, save_news
 from test_technical import history
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_news_round_trip_and_rejects_invalid_replacement(self):
+        evidence = {'basis': 'articles', 'articles': [{'title': 'AAPL results', 'published': '2026-10-01T00:00:00+00:00',
+                    'sentiment': {'label': 'positive'}, 'summary': 'Revenue grew.'}],
+                    'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}}
+        with tempfile.TemporaryDirectory() as directory:
+            save_news(directory, 'AAPL', evidence)
+            with self.assertRaises(ValueError):
+                save_news(directory, 'AAPL', {'basis': 'articles', 'articles': [], 'mean_scores': None})
+            loaded, saved_at = read_news(directory, 'AAPL')
+        self.assertEqual(loaded, evidence)
+        self.assertIsNotNone(saved_at.tzinfo)
+
     def test_prices_and_fundamentals_round_trip_with_timezone(self):
         frame = history([100.] * 40)
         frame['Open'] = 100.

@@ -139,6 +139,8 @@ class Coordinator:
                     raise ValueError("Mismatched agent response")
                 if name == 'market' and evidence.get('comparison_status') != 'available':
                     result = result.model_copy(update={'reliable': False})
+                if name == 'news' and self.offline:
+                    result = result.model_copy(update={'stale': True})
                 decisions[name] = result
                 agents[name] = "completed"
                 emit(name, "completed")
@@ -205,6 +207,12 @@ class Coordinator:
             evidence = await self.news_provider(ticker)
             if not (evidence.get('headlines') or evidence.get('articles')) or evidence.get('mean_scores') is None:
                 raise ValueError('No recent news available')
+            if not self.offline and self.snapshot_directory is not None:
+                from adam.snapshots import save_news
+                try:
+                    await asyncio.to_thread(save_news, self.snapshot_directory, ticker, evidence)
+                except (OSError, ValueError, TypeError) as error:
+                    errors['snapshot_news'] = str(error)
             return evidence
 
         tasks = [market_stream(), run("fundamentals", fundamentals)]

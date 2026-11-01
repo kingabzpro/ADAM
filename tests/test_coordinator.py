@@ -254,6 +254,32 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.agents['news'], 'completed')
         self.assertEqual(result.decisions['news'].agent, 'news')
 
+    async def test_cached_news_is_shown_but_abstains(self):
+        import tempfile
+        article = {'title': 'AAPL results', 'summary': 'Revenue grew', 'published': '2026-10-01T00:00:00+00:00', 'sentiment': {'label': 'positive'}}
+        provider = AsyncMock(return_value={'basis': 'articles', 'articles': [article], 'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}, 'source': 'local snapshot'})
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory:
+            result = await Coordinator(model, None, news_provider=provider, offline=True, snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+        self.assertTrue(result.decisions['news'].stale)
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+
+    async def test_online_news_is_saved_for_offline_use(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from adam.snapshots import read_news
+        evidence = {'basis': 'headlines', 'headlines': [{'title': 'AAPL results',
+                    'published': datetime.now(timezone.utc).isoformat(), 'sentiment': {'label': 'positive'}}],
+                    'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}}
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, None, news_provider=AsyncMock(return_value=evidence), snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+            self.assertEqual(read_news(directory, 'AAPL')[0], evidence)
+        self.assertNotIn('snapshot_news', result.errors)
+
     async def test_evidence_is_preserved_even_when_model_fails(self):
         model = AsyncMock()
         model.assess.side_effect = RuntimeError('model offline')
