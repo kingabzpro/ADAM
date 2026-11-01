@@ -26,21 +26,59 @@ class AnalysisResult:
 
 
 class Coordinator:
-    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, news_provider=None, inference_concurrency: int = 1, data_concurrency: int = 4):
+    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, news_provider=None, inference_concurrency: int = 1, data_concurrency: int = 4, offline: bool = False, snapshot_directory=None):
         if type(inference_concurrency) is not int or inference_concurrency < 1:
             raise ValueError("inference_concurrency must be a positive integer")
         if type(data_concurrency) is not int or data_concurrency < 1:
             raise ValueError("data_concurrency must be a positive integer")
+        if type(offline) is not bool or (offline and snapshot_directory is None):
+            raise ValueError('Offline mode requires a snapshot directory')
         self.model = model
         self.limits = limits
         self.forecaster = forecaster
         self.news_provider = news_provider
+        self.offline = offline
+        self.snapshot_directory = snapshot_directory
+        self.snapshot_times = {}
+        self.snapshot_errors = {}
         self.inference_slots = asyncio.Semaphore(inference_concurrency)
         self.forecast_slot = asyncio.Semaphore(1)
         self.data_slots = asyncio.Semaphore(data_concurrency)
         self._data_tasks = {}
         self._benchmark_task = None
         self._benchmark_started = 0.0
+
+    def _load_prices(self, ticker, period):
+        from adam.snapshots import read_prices, save_prices
+        if self.offline:
+            data, saved = read_prices(self.snapshot_directory, ticker)
+            self.snapshot_times[('prices', ticker)] = saved.isoformat()
+            return data
+        data = fetch_history(ticker, period)
+        if self.snapshot_directory is not None and period == '3mo':
+            try:
+                save_prices(self.snapshot_directory, ticker, data)
+                self.snapshot_errors.pop(('prices', ticker), None)
+            except (OSError, ValueError, TypeError) as error:
+                self.snapshot_errors[('prices', ticker)] = str(error)
+                logging.exception('Unable to save price snapshot for %s', ticker)
+        return data
+
+    def _load_fundamentals(self, ticker):
+        from adam.snapshots import read_fundamentals, save_fundamentals
+        if self.offline:
+            data, saved = read_fundamentals(self.snapshot_directory, ticker)
+            self.snapshot_times[('fundamentals', ticker)] = saved.isoformat()
+            return data
+        data = fetch_fundamentals(ticker)
+        if self.snapshot_directory is not None:
+            try:
+                save_fundamentals(self.snapshot_directory, ticker, data)
+                self.snapshot_errors.pop(('fundamentals', ticker), None)
+            except (OSError, ValueError, TypeError) as error:
+                self.snapshot_errors[('fundamentals', ticker)] = str(error)
+                logging.exception('Unable to save fundamentals snapshot for %s', ticker)
+        return data
 
     async def _fetch_data(self, key, function, *args):
         task = self._data_tasks.get(key)
@@ -64,7 +102,7 @@ class Coordinator:
         if (task is None or (task.done() and (task.cancelled() or task.exception() is not None
                                                or time.monotonic() - self._benchmark_started > 60))):
             self._benchmark_started = time.monotonic()
-            task = asyncio.create_task(self._fetch_data(('prices', 'SPY'), fetch_history, 'SPY', '3mo'))
+            task = asyncio.create_task(self._fetch_data(('prices', 'SPY'), self._load_prices, 'SPY', '3mo'))
             task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
             self._benchmark_task = task
         return await asyncio.shield(task)
@@ -110,8 +148,10 @@ class Coordinator:
                 emit(name, "failed")
 
         async def fundamentals():
-            info = await self._fetch_data(('fundamentals', ticker), fetch_fundamentals, ticker)
+            info = await self._fetch_data(('fundamentals', ticker), self._load_fundamentals, ticker)
             evidence = fundamentals_evidence(info)
+            if self.offline:
+                evidence.update(source='local snapshot', snapshot_saved_at=self.snapshot_times[('fundamentals', ticker)])
             if not evidence["metrics"] or evidence["freshness"] != "current":
                 raise ValueError("Fundamentals missing or fiscal quarter date stale or unknown")
             return evidence
@@ -119,7 +159,7 @@ class Coordinator:
         async def market_stream():
             emit("market_data", "started")
             try:
-                history = await self._fetch_data(('prices', ticker), fetch_history, ticker, '3mo')
+                history = await self._fetch_data(('prices', ticker), self._load_prices, ticker, '3mo')
             except Exception as error:
                 errors["market_data"] = str(error)
                 emit("market_data", "failed")
@@ -132,11 +172,15 @@ class Coordinator:
 
             async def market():
                 evidence = await asyncio.to_thread(market_evidence, history)
+                if self.offline:
+                    evidence.update(source='local snapshot', snapshot_saved_at=self.snapshot_times[('prices', ticker)])
                 emit('benchmark', 'started')
                 try:
                     benchmark = history if ticker == 'SPY' else await self.benchmark_history()
                     evidence['comparison'] = await asyncio.to_thread(compare_market, history, benchmark)
                     evidence['comparison_status'] = 'available'
+                    if self.offline:
+                        evidence['benchmark_snapshot_saved_at'] = self.snapshot_times[('prices', 'SPY')]
                     emit('benchmark', 'completed')
                 except Exception as error:
                     evidence['comparison'] = None
@@ -167,6 +211,10 @@ class Coordinator:
         if self.news_provider is not None:
             tasks.append(run('news', news))
         await asyncio.gather(*tasks)
+        for kind, symbol in (('prices', ticker), ('fundamentals', ticker), ('prices', 'SPY')):
+            if (kind, symbol) in self.snapshot_errors:
+                label = f'snapshot_{kind}' if symbol == ticker else 'snapshot_benchmark'
+                errors[label] = self.snapshot_errors[(kind, symbol)]
         evaluated_risk = risk_evidence
         market = evidence_by_agent.get('market')
         if market and risk_evidence.market_time is not None:
@@ -181,5 +229,8 @@ class Coordinator:
         if missing_critical and result.status != "fail":
             result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
                                 reasons=result.reasons + missing_critical)
+        if self.offline:
+            result = RiskResult(status='fail' if result.status == 'fail' else 'insufficient_evidence',
+                                action='NO_TRADE', reasons=result.reasons + ('offline_snapshot',))
         emit("risk", result.action)
         return AnalysisResult(ticker, agents, decisions, result, errors, timeline, evidence_by_agent, evaluated_risk)

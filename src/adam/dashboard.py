@@ -14,6 +14,7 @@ from adam.history import record_analysis, read_history
 from adam.news import news_evidence
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
+from adam.snapshots import read_prices
 
 from adam.market import fetch_history, fetch_many
 
@@ -72,11 +73,14 @@ def format_agent(name, status, decision):
     return f"{name}: {decision.signal} ({scores}){label}"
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None, data_concurrency=4, ticker_concurrency=4) -> list[dict]:
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None, data_concurrency=4, ticker_concurrency=4, offline=False, snapshot_directory=None) -> list[dict]:
     if type(ticker_concurrency) is not int or ticker_concurrency < 1:
         raise ValueError('ticker_concurrency must be a positive integer')
+    if offline and news:
+        raise ValueError('News is unavailable in offline mode')
     async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
-        forecaster = await asyncio.to_thread(shared_forecaster) if forecast else None
+        forecaster = (await asyncio.to_thread(shared_forecaster, local_files_only=True) if offline
+                      else await asyncio.to_thread(shared_forecaster)) if forecast else None
         classifier = await asyncio.to_thread(shared_classifier) if news else None
 
         async def news_provider(ticker):
@@ -85,7 +89,8 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
 
         coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster,
                                   news_provider=news_provider if news else None,
-                                  inference_concurrency=inference_concurrency, data_concurrency=data_concurrency)
+                                  inference_concurrency=inference_concurrency, data_concurrency=data_concurrency,
+                                  offline=offline, snapshot_directory=snapshot_directory)
         ticker_slots = asyncio.Semaphore(ticker_concurrency)
 
         async def analyze(ticker):
@@ -113,6 +118,8 @@ def dashboard(config) -> None:
     ui.label("ADAM").classes("text-h4")
     ui.label("Local market research and decision support")
     ui.label("Research signals are preliminary. No Trade is returned until risk limits and evidence are configured.")
+    snapshot_directory = Path.home() / '.adam' / 'snapshots'
+    offline_toggle = ui.checkbox('Offline: use saved snapshots, disable news, always No Trade', value=False)
     tickers = ui.input("Tickers, separated by commas", value="AAPL, MSFT")
     status = ui.label()
     table = ui.table(columns=[
@@ -131,9 +138,14 @@ def dashboard(config) -> None:
         status.text = "Loading market data..."
         table.rows = []
         try:
-            results = await fetch_many(symbols)
+            if offline_toggle.value:
+                results = await asyncio.gather(*(asyncio.to_thread(read_prices, snapshot_directory, symbol)
+                                                 for symbol in symbols), return_exceptions=True)
+                results = [item[0] if not isinstance(item, BaseException) else item for item in results]
+            else:
+                results = await fetch_many(symbols)
             table.rows = market_rows(symbols, results)
-            status.text = "Daily closing prices, adjusted by Yahoo Finance."
+            status.text = 'Saved snapshots; dates may be stale.' if offline_toggle.value else "Daily closing prices, adjusted by Yahoo Finance."
         finally:
             button.enable()
 
@@ -174,7 +186,7 @@ def dashboard(config) -> None:
 
         try:
             limits, evidence = parse_risk_input(risk_input.value or "")
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path, data_concurrency=config.data_concurrency, ticker_concurrency=config.ticker_concurrency)
+            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path, data_concurrency=config.data_concurrency, ticker_concurrency=config.ticker_concurrency, offline=offline_toggle.value, snapshot_directory=snapshot_directory)
             with evidence_details:
                 for row in analysis_table.rows:
                     with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):
@@ -228,6 +240,9 @@ def dashboard(config) -> None:
     outcomes = ui.code('', language='json').classes('w-full')
 
     async def show_outcomes():
+        if offline_toggle.value:
+            outcomes_status.text = 'Outcome evaluation requires online market data.'
+            return
         symbols = parse_tickers(tickers.value or '')
         if len(symbols) != 1:
             outcomes_status.text = 'Enter exactly one ticker to evaluate saved Buy decisions.'

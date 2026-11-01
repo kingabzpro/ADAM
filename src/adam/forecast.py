@@ -13,11 +13,11 @@ def load_forecaster(model: str = "mistralai/Timestral-5M", *, device: str = "cpu
     return TimestralForecaster.from_pretrained(model, device=device, local_files_only=local_files_only)
 
 
-def shared_forecaster():
+def shared_forecaster(*, local_files_only=False):
     global _forecaster
     with _model_lock:
         if _forecaster is None:
-            _forecaster = load_forecaster()
+            _forecaster = load_forecaster(local_files_only=local_files_only)
         return _forecaster
 
 

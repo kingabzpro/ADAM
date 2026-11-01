@@ -17,6 +17,21 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(rows[2]["status"], "No price history")
 
 class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_offline_uses_cached_forecaster_and_disallows_network_news(self):
+        from unittest.mock import AsyncMock, patch, sentinel
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, evidence={}, errors={},
+            risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('offline_snapshot',)))
+        with patch('adam.dashboard.Coordinator', return_value=coordinator) as factory, \
+             patch('adam.dashboard.shared_forecaster', return_value=sentinel.forecaster) as forecast:
+            await run_analysis(['AAPL'], 1, forecast=True, offline=True, snapshot_directory='cache')
+        forecast.assert_called_once_with(local_files_only=True)
+        self.assertTrue(factory.call_args.kwargs['offline'])
+        with self.assertRaises(ValueError):
+            await run_analysis(['AAPL'], 1, offline=True, news=True, snapshot_directory='cache')
     async def test_ticker_concurrency_limits_active_analyses(self):
         import asyncio
         from unittest.mock import patch

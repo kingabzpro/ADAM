@@ -14,6 +14,72 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.patch_fundamentals.start()
         self.addCleanup(self.patch_fundamentals.stop)
 
+    async def test_offline_analysis_uses_snapshots_and_never_approves_trade(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from adam.snapshots import save_prices, save_fundamentals
+        from test_risk import EVIDENCE
+        prices = history([100.] * 40)
+        prices['Open'] = 100.
+        now = datetime.now(timezone.utc)
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory:
+            for ticker in ('AAPL', 'SPY'):
+                save_prices(directory, ticker, prices)
+            save_fundamentals(directory, 'AAPL', {'revenueGrowth': .1, 'mostRecentQuarter': now.timestamp()})
+            with patch('adam.coordinator.fetch_history', side_effect=AssertionError('network')), \
+                 patch('adam.coordinator.fetch_fundamentals', side_effect=AssertionError('network')):
+                result = await Coordinator(model, LIMITS, offline=True, snapshot_directory=directory).analyze('AAPL', RiskEvidence(**(EVIDENCE | {'market_time': now})))
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertIn('offline_snapshot', result.risk.reasons)
+        self.assertEqual(result.evidence['market']['source'], 'local snapshot')
+        self.assertEqual(result.evidence['fundamentals']['source'], 'local snapshot')
+
+    async def test_offline_missing_snapshots_do_not_fall_back_to_network(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', side_effect=AssertionError('network')), \
+             patch('adam.coordinator.fetch_fundamentals', side_effect=AssertionError('network')):
+            result = await Coordinator(AsyncMock(), None, offline=True, snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertEqual(result.agents['market'], 'failed')
+        self.assertIn('market_data', result.errors)
+
+    async def test_online_analysis_saves_data_for_future_offline_use(self):
+        import tempfile
+        from datetime import datetime, timezone
+        from adam.snapshots import read_prices, read_fundamentals
+        prices = history([100.] * 40)
+        prices['Open'] = 100.
+        info = {'revenueGrowth': .1, 'mostRecentQuarter': datetime.now(timezone.utc).timestamp()}
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', return_value=prices), \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info):
+            await Coordinator(model, None, snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+            self.assertEqual(len(read_prices(directory, 'AAPL')[0]), 40)
+            self.assertEqual(len(read_prices(directory, 'SPY')[0]), 40)
+            self.assertEqual(read_fundamentals(directory, 'AAPL')[0]['revenueGrowth'], .1)
+
+    async def test_snapshot_write_failure_is_reported_without_losing_analysis(self):
+        import tempfile
+        from datetime import datetime, timezone
+        prices = history([100.] * 40)
+        prices['Open'] = 100.
+        info = {'revenueGrowth': .1, 'mostRecentQuarter': datetime.now(timezone.utc).timestamp()}
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('adam.coordinator.fetch_history', return_value=prices), \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info), \
+             patch('adam.snapshots.save_prices', side_effect=PermissionError('read only')):
+            with self.assertLogs(level='ERROR'):
+                result = await Coordinator(model, None, snapshot_directory=directory).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['market'], 'completed')
+        self.assertIn('read only', result.errors['snapshot_prices'])
+
     async def test_data_requests_share_inflight_work_and_survive_one_cancellation(self):
         import asyncio
         from unittest.mock import AsyncMock

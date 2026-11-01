@@ -7,6 +7,14 @@ from adam.forecast import forecast_evidence
 
 
 class ForecastTests(unittest.TestCase):
+    def test_shared_forecaster_respects_offline_loading(self):
+        from unittest.mock import patch, sentinel
+        from adam.forecast import shared_forecaster
+        with patch('adam.forecast._forecaster', None), \
+             patch('adam.forecast.load_forecaster', return_value=sentinel.model) as load:
+            self.assertIs(shared_forecaster(local_files_only=True), sentinel.model)
+        load.assert_called_once_with(local_files_only=True)
+
     def test_quantiles_and_returns_for_multiple_horizons(self):
         model = MagicMock()
         output = model.forecast.return_value

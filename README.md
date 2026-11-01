@@ -24,6 +24,8 @@ Enter ticker symbols in the dashboard, select the evidence streams you want, and
 
 Concurrency settings are optional; see the [configuration guide](docs/configuration.md).
 
+Online analyses save local data snapshots for [offline research](docs/offline.md). Offline results always show **No Trade**.
+
 ## Built with
 
 - **Market data:** Yahoo Finance · **Forecasts:** Timestral · **Sentiment:** FinBERT
