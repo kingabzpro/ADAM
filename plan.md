@@ -646,7 +646,7 @@ adam/
 - [ ] Add request deduplication.
 - [ ] Measure p50/p95/p99 decision latency.
 - [ ] Test concurrent workloads across multiple tickers.
-  - Added a bounded live coordinator benchmark; a four-ticker run succeeded with market, technical, and fundamentals agents. Larger live workloads and forecast/news coverage remain to be measured.
+  - Added a bounded live coordinator benchmark. On Windows, a 20-ticker run at concurrency 4 completed 18 tickers; two encountered Yahoo connection failures. Successful ticker latency was p50 22.7s, p95 46.3s, p99 51.3s, including network time. Forecast and news coverage and repeat measurements remain outstanding.
 
 ### Phase 6 — Evaluation
 
