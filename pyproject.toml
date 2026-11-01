@@ -1,0 +1,17 @@
+[project]
+name = "adam"
+version = "0.1.0"
+description = "Local AI research and decision-support platform"
+authors = [
+    { name = "Abid Ali Awan", email = "36753484+kingabzpro@users.noreply.github.com" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+adam = "adam:main"
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
