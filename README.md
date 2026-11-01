@@ -36,6 +36,6 @@ uv run python -m unittest discover -s tests
 uv run adam-benchmark --requests 10 --concurrency 2
 ```
 
-The benchmark requires the local D3 model and reports warmup, latency, throughput, and Ollama-reported model memory.
+The benchmark requires the local D3 model. See the [testing guide](docs/testing.md) for the real-model check.
 
 See [plan.md](plan.md) for the roadmap. ADAM code is licensed under [Apache 2.0](LICENSE); model licenses are separate.
