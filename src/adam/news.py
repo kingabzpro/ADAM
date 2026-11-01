@@ -127,3 +127,18 @@ async def headline_evidence(ticker, client, classifier, *, now=None, max_age_day
     return {'basis': 'headlines', 'headlines': selected, 'mean_scores': scored['mean_scores'],
             'excluded_count': len(items) - len(selected),
             'note': 'Search results may be unrelated; sentiment covers headlines, not full articles.'}
+
+
+def compact_news_evidence(evidence):
+    # shortcut: D3 sees at most 10 shortened titles; increase after context budgeting is measured.
+    headlines = evidence['headlines']
+    return {
+        'basis': 'headlines',
+        'total_headlines': len(headlines),
+        'headlines': [{'title': item.get('title', '')[:240],
+                       'published': item.get('published'),
+                       'sentiment': item.get('sentiment', {}).get('label')}
+                      for item in headlines[:10]],
+        'mean_scores': {name: round(value, 4) for name, value in evidence['mean_scores'].items()},
+        'note': 'Headline sentiment only; search results may be unrelated. The aggregate covers all scored headlines; titles shown are limited and may be shortened.',
+    }

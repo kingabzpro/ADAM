@@ -226,3 +226,20 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             missing = await coordinator.analyze('AAPL', RiskEvidence())
         self.assertEqual(result.evaluated_risk_evidence.market_time, older)
         self.assertIsNone(missing.evaluated_risk_evidence.market_time)
+
+    async def test_news_prompt_is_compact_without_losing_saved_evidence(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        items = [{'title': 'AAPL ' + ('growth ' * 60), 'url': 'https://example.com/' + 'x' * 1000,
+                  'published': '2026-10-01T00:00:00+00:00', 'source': 'Example',
+                  'sentiment': {'label': 'positive', 'scores': {'positive': .8, 'neutral': .1, 'negative': .1}}}
+                 for _ in range(20)]
+        provider = AsyncMock(return_value={'basis': 'headlines', 'headlines': items, 'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}})
+        with patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, None, news_provider=provider).analyze('AAPL', RiskEvidence())
+        self.assertEqual(len(result.evidence['news']['headlines']), 20)
+        prompt = next(call.args[2] for call in model.assess.await_args_list if call.args[1] == 'news')
+        self.assertEqual(prompt['total_headlines'], 20)
+        self.assertEqual(len(prompt['headlines']), 10)
+        self.assertNotIn('url', prompt['headlines'][0])
+        self.assertLessEqual(len(prompt['headlines'][0]['title']), 240)

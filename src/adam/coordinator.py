@@ -8,6 +8,7 @@ from adam.decisions import Decision, consensus
 from adam.forecast import forecast_evidence
 from adam.fundamentals import fetch_fundamentals, fundamentals_evidence
 from adam.market import compare_market, fetch_history, market_evidence
+from adam.news import compact_news_evidence
 from adam.risk import RiskEvidence, RiskLimits, RiskResult, evaluate_risk
 from adam.technical import technical_evidence
 
@@ -71,8 +72,9 @@ class Coordinator:
             try:
                 evidence = await compute()
                 evidence_by_agent[name] = evidence
+                model_evidence = compact_news_evidence(evidence) if name == 'news' else evidence
                 async with self.inference_slots:
-                    result = await self.model.assess(ticker, name, evidence)
+                    result = await self.model.assess(ticker, name, model_evidence)
                 if result.ticker != ticker or result.agent != name or result.status != "completed":
                     raise ValueError("Mismatched agent response")
                 if name == 'market' and evidence.get('comparison_status') != 'available':
