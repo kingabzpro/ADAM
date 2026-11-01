@@ -42,7 +42,7 @@ class CalibrationTests(unittest.TestCase):
         self.assertEqual(result['expected_calibration_error'], 1.)
 
     def test_rejects_signal_that_disagrees_with_scores(self):
-        incorrect = decision('market', 'SELL')
+        incorrect = decision('market', 'SELL').model_copy(update={'probabilities': {'BUY': 0.7, 'HOLD': 0.2, 'SELL': 0.1}})
         with self.assertRaises(ValueError):
             evaluate_calibration([{'decision': incorrect.model_dump(), 'label': 'BUY'}])
 

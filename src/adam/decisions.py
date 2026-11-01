@@ -39,7 +39,16 @@ class Consensus(BaseModel):
     abstained: tuple[Agent, ...]
 
 
-def consensus(decisions: list[Decision], weights: dict[Agent, float] | None = None) -> Consensus:
+def consensus(decisions: list[Decision], weights: dict[Agent, float] | None = None, *, margin: float = 0.0) -> Consensus:
+    """Directional soft vote: weighted mean probabilities decide between BUY and SELL.
+
+    Categorical HOLD votes no longer block the call; the consensus goes with whichever
+    direction the agents lean toward on average. HOLD is returned only when the lean is
+    balanced within margin or nobody votes. Counts and disagreement still report the
+    agents' categorical signals for display.
+    """
+    if not isfinite(margin) or isinstance(margin, bool) or not 0 <= margin < 1:
+        raise ValueError("margin must be between 0 and 1")
     if len({d.agent for d in decisions}) != len(decisions):
         raise ValueError("Only one decision per agent is allowed")
     if len({d.ticker for d in decisions}) > 1:
@@ -48,11 +57,18 @@ def consensus(decisions: list[Decision], weights: dict[Agent, float] | None = No
     if weights is not None and any(d.agent not in weights or not isfinite(weights[d.agent]) or weights[d.agent] <= 0 for d in available):
         raise ValueError("Each voting agent needs a positive finite weight")
     counts = Counter(d.signal for d in available)
-    totals = {signal: sum((weights[d.agent] if weights is not None else 1) for d in available if d.signal == signal)
-              for signal in ("BUY", "HOLD", "SELL")}
-    highest = max(totals.values())
-    winners = [signal for signal, total in totals.items() if total == highest]
-    signal = None if not available else winners[0] if len(winners) == 1 else "HOLD"
-    return Consensus(signal=signal, counts={s: counts[s] for s in totals},
+    weight_total = sum((weights[d.agent] if weights is not None else 1) for d in available)
+    means = {signal: sum((weights[d.agent] if weights is not None else 1) * d.probabilities[signal]
+                         for d in available) / weight_total
+             for signal in ("BUY", "HOLD", "SELL")} if available else None
+    if means is None:
+        signal = None
+    elif means["BUY"] - means["SELL"] > margin:
+        signal = "BUY"
+    elif means["SELL"] - means["BUY"] > margin:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+    return Consensus(signal=signal, counts={s: counts[s] for s in ("BUY", "HOLD", "SELL")},
                      disagreement=len(counts) > 1,
                      abstained=tuple(d.agent for d in decisions if d not in available))
