@@ -15,3 +15,22 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(rows[0], {"ticker": "AAPL", "date": "2026-01-02", "close": "101.50", "status": "Daily close"})
         self.assertEqual(rows[1]["status"], "Data unavailable")
         self.assertEqual(rows[2]["status"], "No price history")
+
+class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_analysis_rows_show_votes_and_risk(self):
+        from unittest.mock import AsyncMock, patch
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        from test_decisions import decision
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(
+            decisions={'market': decision('market')}, agents={'market': 'completed', 'news': 'unavailable'},
+            risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)), errors={})
+        with patch('adam.dashboard.Coordinator', return_value=coordinator):
+            rows = await run_analysis(['AAPL'], inference_concurrency=1)
+        self.assertEqual(rows[0]['ticker'], 'AAPL')
+        self.assertIn('market: BUY', rows[0]['agents'])
+        self.assertIn('news: unavailable', rows[0]['agents'])
+        self.assertEqual(rows[0]['action'], 'NO_TRADE')
+        self.assertIn('risk_limits', rows[0]['risk'])

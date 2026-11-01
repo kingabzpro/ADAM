@@ -19,7 +19,7 @@ class AnalysisResult:
 
 
 class Coordinator:
-    def __init__(self, model, limits: RiskLimits, *, forecaster=None, inference_concurrency: int = 1):
+    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, inference_concurrency: int = 1):
         if type(inference_concurrency) is not int or inference_concurrency < 1:
             raise ValueError("inference_concurrency must be a positive integer")
         self.model = model
@@ -82,5 +82,6 @@ class Coordinator:
             await asyncio.gather(*tasks)
 
         await asyncio.gather(market_stream(), run("fundamentals", fundamentals))
-        result = evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
+        result = (evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
+                  if self.limits is not None else RiskResult(status="insufficient_evidence", action="NO_TRADE", reasons=("risk_limits",)))
         return AnalysisResult(ticker, agents, decisions, result, errors)

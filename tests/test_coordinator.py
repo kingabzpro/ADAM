@@ -68,3 +68,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence())
         self.assertEqual(result.agents['fundamentals'], 'failed')
         model.assess.assert_not_awaited()
+
+    async def test_missing_risk_limits_never_approves_vote(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.risk.status, 'insufficient_evidence')
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertIn('risk_limits', result.risk.reasons)
