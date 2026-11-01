@@ -1,14 +1,16 @@
 import re
 from datetime import timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.robotparser import RobotFileParser
 from xml.etree.ElementTree import ParseError
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 
 MAX_FEED_BYTES = 2_000_000
-ARTICLE_HOSTS = {'coincentral.com', 'www.coincentral.com'}
+ARTICLE_HOSTS = {'coincentral.com', 'www.coincentral.com', 'blockonomi.com', 'www.blockonomi.com'}
+NEWS_USER_AGENT = 'ADAMResearchBot/0.1'
 
 
 def parse_feed(content: bytes) -> list[dict]:
@@ -134,6 +136,7 @@ async def article_evidence(ticker, client, classifier, *, now=None):
                 raise ValueError('News feed is too large')
     records = []
     attempts = 0
+    robots = {}
     for item in parse_feed(bytes(content)):
         wrapper = urlsplit(item['url'])
         if wrapper.hostname != 'www.bing.com' or wrapper.path != '/news/apiclick.aspx':
@@ -154,7 +157,37 @@ async def article_evidence(ticker, client, classifier, *, now=None):
         if attempts > 10:
             break
         try:
-            async with client.stream('GET', candidates[0], follow_redirects=False, timeout=15) as response:
+            host = url.hostname
+            if host not in robots:
+                robots[host] = None
+                async with client.stream('GET', f'https://{host}/robots.txt', follow_redirects=False,
+                                         headers={'User-Agent': NEWS_USER_AGENT}, timeout=10) as response:
+                    if response.status_code == 404:
+                        robots[host] = True
+                    elif response.status_code == 200:
+                        rules = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            rules.extend(chunk)
+                            if len(rules) > 256_000:
+                                raise ValueError('Robots file is too large')
+                        lines = bytes(rules).decode('utf-8', errors='replace').splitlines()
+                        # robotparser does not implement wildcard or end-anchor path matching.
+                        if any(re.match(r'^\s*(allow|disallow)\s*:.*[*$]', line, re.I) for line in lines):
+                            continue
+                        parser = RobotFileParser()
+                        parser.parse(lines)
+                        # Conservatively honor every disallow, including more-specific rules.
+                        denied = [unquote(match.group(1).split('#', 1)[0].strip()) for line in lines
+                                  if (match := re.match(r'^\s*disallow\s*:\s*(.*)', line, re.I))]
+                        robots[host] = (parser, [path for path in denied if path])
+            policy = robots[host]
+            path_query = unquote(url.path + (f'?{url.query}' if url.query else ''))
+            if (policy is None or (policy is not True and
+                    (not policy[0].can_fetch(NEWS_USER_AGENT, candidates[0])
+                     or any(path_query.startswith(path) for path in policy[1])))):
+                continue
+            async with client.stream('GET', candidates[0], follow_redirects=False,
+                                     headers={'User-Agent': NEWS_USER_AGENT}, timeout=15) as response:
                 if response.status_code != 200 or 'text/html' not in response.headers.get('content-type', '').lower():
                     continue
                 body = bytearray()
