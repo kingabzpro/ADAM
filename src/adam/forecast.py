@@ -8,7 +8,7 @@ def load_forecaster(model: str = "mistralai/Timestral-5M", *, device: str = "cpu
 
 
 def forecast_evidence(prices, horizon: int, forecaster) -> dict:
-    values = np.asarray(prices, dtype=float)
+    values = np.array(prices, dtype=float, copy=True)
     if (values.ndim != 1 or values.size < 2 or not np.isfinite(values).all()
             or (values <= 0).any() or type(horizon) is not int or horizon < 1):
         raise ValueError("A positive price series and forecast horizon are required")
