@@ -178,6 +178,16 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.agents['news'], 'failed')
         model.assess.assert_not_awaited()
 
+    async def test_article_news_contributes_one_category_vote(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        article = {'title': 'AAPL results', 'summary': 'Revenue grew', 'published': '2026-10-01', 'sentiment': {'label': 'positive'}}
+        provider = AsyncMock(return_value={'basis': 'articles', 'articles': [article], 'mean_scores': {'positive': .8, 'neutral': .1, 'negative': .1}})
+        with patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, None, news_provider=provider).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['news'], 'completed')
+        self.assertEqual(result.decisions['news'].agent, 'news')
+
     async def test_evidence_is_preserved_even_when_model_fails(self):
         model = AsyncMock()
         model.assess.side_effect = RuntimeError('model offline')

@@ -6,7 +6,7 @@
 
 ADAM combines market data, local forecasting, financial sentiment, and D3 decision models in a single research dashboard. A deterministic risk gate checks the consensus before presenting a result.
 
-> **Work in progress:** Full-article news, automated risk evidence, and historical evaluation are still being developed. ADAM is a research tool, not a brokerage or a promise of returns.
+> **Work in progress:** News coverage, automated risk evidence, and historical evaluation are still being developed. ADAM is a research tool, not a brokerage or a promise of returns.
 
 ## Get started
 
@@ -29,7 +29,7 @@ Concurrency settings are optional; see the [configuration guide](docs/configurat
 - **Market data:** Yahoo Finance · **Forecasts:** Timestral · **Sentiment:** FinBERT
 - **Decisions:** D3 via Ollama · **Interface:** NiceGUI · **Runtime:** Python and uv
 
-Model inference runs locally; market data, news searches, setup, and model downloads use the internet. News sentiment currently covers headlines, which may be unrelated to the ticker. FinBERT weights are [CC BY-NC-SA 4.0](https://huggingface.co/ProsusAI/finbert); review their terms before use.
+Model inference runs locally; market data, news searches, setup, and model downloads use the internet. News uses a [limited article source](docs/news.md) and falls back to headlines; results may be unrelated to the ticker. FinBERT weights are [CC BY-NC-SA 4.0](https://huggingface.co/ProsusAI/finbert); review their terms before use.
 
 ## Development
 

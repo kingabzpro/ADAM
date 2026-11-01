@@ -1,0 +1,5 @@
+# News coverage
+
+When news sentiment is enabled, ADAM searches Bing News and attempts to retrieve recent articles from CoinCentral, the only publisher currently enabled for article retrieval. It does not follow article redirects or fetch arbitrary hosts. Articles must mention the ticker, but a mention does not prove relevance. At most five readable articles are scored, duplicate text is excluded, and a short extract with source and date is kept in the analysis. FinBERT truncates long inputs, so its sentiment reflects the beginning of an article rather than the entire text. The analysis history may contain those extracts and source links.
+
+If no usable article is found or article discovery is unavailable, ADAM searches Google News and scores recent headlines instead. The result identifies whether it used articles or headlines. Coverage is narrow, search results can be unrelated, and publisher availability can change; missing news causes that agent to abstain. Neither sentiment nor a summary establishes a news event's investment impact.

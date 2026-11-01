@@ -1,13 +1,14 @@
 import re
 from datetime import timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from xml.etree.ElementTree import ParseError
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 
 MAX_FEED_BYTES = 2_000_000
+ARTICLE_HOSTS = {'coincentral.com', 'www.coincentral.com'}
 
 
 def parse_feed(content: bytes) -> list[dict]:
@@ -93,6 +94,92 @@ def analyze_articles(records: list[dict], classifier) -> dict:
     return {"articles": articles, "scored_count": len(unique_texts), "mean_scores": evidence["mean_scores"]}
 
 
+async def article_evidence(ticker, client, classifier, *, now=None):
+    """Search Bing and score recent accessible articles from an explicit host list."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    import httpx
+
+    symbol = ticker.strip().upper()
+    if not re.fullmatch(r'[A-Z0-9.^=\-]{3,20}', symbol):
+        raise ValueError('Invalid ticker for article search')
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError('now must be timezone-aware')
+    async with client.stream('GET', 'https://www.bing.com/news/search',
+                             params={'q': f'{symbol} stock', 'format': 'rss'},
+                             follow_redirects=False, timeout=15) as response:
+        response.raise_for_status()
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > MAX_FEED_BYTES:
+                raise ValueError('News feed is too large')
+    records = []
+    attempts = 0
+    for item in parse_feed(bytes(content)):
+        wrapper = urlsplit(item['url'])
+        if wrapper.hostname != 'www.bing.com' or wrapper.path != '/news/apiclick.aspx':
+            continue
+        candidates = parse_qs(wrapper.query).get('url', [])
+        if len(candidates) != 1:
+            continue
+        url = urlsplit(candidates[0])
+        try:
+            published = datetime.fromisoformat(item.get('published') or '')
+            age = now - published
+            if (url.scheme != 'https' or url.hostname not in ARTICLE_HOSTS or url.username or url.password
+                    or url.port not in (None, 443) or age < timedelta(0) or age > timedelta(days=7)):
+                continue
+        except (ValueError, TypeError):
+            continue
+        attempts += 1
+        if attempts > 10:
+            break
+        try:
+            async with client.stream('GET', candidates[0], follow_redirects=False, timeout=15) as response:
+                if response.status_code != 200 or 'text/html' not in response.headers.get('content-type', '').lower():
+                    continue
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    body.extend(chunk)
+                    if len(body) > 1_000_000:
+                        raise ValueError('Article is too large')
+                html = bytes(body).decode(response.encoding or 'utf-8', errors='replace')
+            text = await asyncio.to_thread(extract_article, html)
+        except (httpx.HTTPError, ValueError, LookupError):
+            continue
+        if not text or not re.search(r'(?<![A-Za-z0-9])' + re.escape(symbol) + r'(?![A-Za-z0-9])', text):
+            continue
+        records.append({'title': item['title'], 'url': candidates[0], 'published': item['published'],
+                        'source': url.hostname, 'text': text[:20000]})
+        if len(records) >= 5:
+            break
+    result = await asyncio.to_thread(analyze_articles, records, classifier)
+    articles = []
+    for article in result['articles']:
+        if article['status'] == 'scored':
+            text = article.pop('text')
+            article['summary'] = ' '.join(text.split())[:300]
+            articles.append(article)
+    return {'basis': 'articles', 'articles': articles, 'mean_scores': result['mean_scores'],
+            'note': 'Limited publisher coverage; FinBERT scores the beginning of each article. Ticker mention does not guarantee relevance.'}
+
+
+async def news_evidence(ticker, client, classifier):
+    import httpx
+
+    try:
+        articles = await article_evidence(ticker, client, classifier)
+        if articles['articles']:
+            return articles
+    except (httpx.HTTPError, ValueError):
+        pass
+    result = await headline_evidence(ticker, client, classifier)
+    result['note'] = 'Article retrieval unavailable or yielded no usable articles; search headlines may be unrelated.'
+    return result
+
+
 async def headline_evidence(ticker, client, classifier, *, now=None, max_age_days=7, limit=20):
     import asyncio
     from datetime import datetime, timedelta, timezone
@@ -130,6 +217,13 @@ async def headline_evidence(ticker, client, classifier, *, now=None, max_age_day
 
 
 def compact_news_evidence(evidence):
+    if evidence['basis'] == 'articles':
+        return {'basis': 'articles', 'total_articles': len(evidence['articles']),
+                'articles': [{'title': item.get('title', '')[:200], 'summary': item.get('summary', '')[:300],
+                              'published': item.get('published'), 'sentiment': item.get('sentiment', {}).get('label')}
+                             for item in evidence['articles'][:5]],
+                'mean_scores': {name: round(value, 4) for name, value in evidence['mean_scores'].items()},
+                'note': 'Limited publisher coverage; sentiment covers article beginnings and ticker mention does not guarantee relevance.'}
     # shortcut: D3 sees at most 10 shortened titles; increase after context budgeting is measured.
     headlines = evidence['headlines']
     return {

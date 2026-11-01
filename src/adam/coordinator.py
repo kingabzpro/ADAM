@@ -159,8 +159,8 @@ class Coordinator:
 
         async def news():
             evidence = await self.news_provider(ticker)
-            if not evidence.get('headlines') or evidence.get('mean_scores') is None:
-                raise ValueError('No recent headlines available')
+            if not (evidence.get('headlines') or evidence.get('articles')) or evidence.get('mean_scores') is None:
+                raise ValueError('No recent news available')
             return evidence
 
         tasks = [market_stream(), run("fundamentals", fundamentals)]

@@ -11,7 +11,7 @@ from adam.d3 import D3Client
 from adam.evaluation import evaluate_saved_buys
 from adam.forecast import shared_forecaster
 from adam.history import record_analysis, read_history
-from adam.news import headline_evidence
+from adam.news import news_evidence
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
 
@@ -80,8 +80,8 @@ async def run_analysis(tickers: list[str], inference_concurrency: int, limits=No
         classifier = await asyncio.to_thread(shared_classifier) if news else None
 
         async def news_provider(ticker):
-            async with httpx.AsyncClient(timeout=30) as news_http:
-                return await headline_evidence(ticker, news_http, classifier)
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as news_http:
+                return await news_evidence(ticker, news_http, classifier)
 
         coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster,
                                   news_provider=news_provider if news else None,
@@ -144,7 +144,7 @@ def dashboard(config) -> None:
     ui.label(f'Analyses and supplied risk inputs are saved locally to {history_path}.')
     analysis_status = ui.label("Requires Ollama and the local d3:2b model. Run uv run adam-setup.")
     forecast_toggle = ui.checkbox('Include Timestral forecast (requires forecast extra)', value=importlib.util.find_spec('timestral') is not None)
-    news_toggle = ui.checkbox('Include recent headline sentiment (requires sentiment extra)', value=False)
+    news_toggle = ui.checkbox('Include news sentiment (requires sentiment extra)', value=False)
     risk_input = ui.textarea("Optional risk limits and per-ticker evidence (JSON)").classes("w-full")
     ui.label('Analysis timeline')
     timeline = ui.log(max_lines=200).classes('w-full h-40')
