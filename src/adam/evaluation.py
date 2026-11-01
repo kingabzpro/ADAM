@@ -1,6 +1,37 @@
 import numpy as np
+import pandas as pd
 
 from adam.forecast import forecast_evidence
+
+
+def compare_voting(prices, decisions, evidence, limits, *, weights, initial_cash=10000.0, cost_bps=0.0):
+    """Compare precomputed point-in-time votes; timestamps denote signal times.
+
+    Callers must use weights fixed before this evaluation and evidence available at
+    each timestamp. This function cannot verify those provenance requirements.
+    """
+    from adam.backtest import backtest
+    from adam.decisions import consensus
+    from adam.risk import evaluate_risk
+
+    if (not isinstance(weights, dict) or not weights
+            or not isinstance(prices.index, pd.DatetimeIndex) or prices.index.tz is None
+            or len(decisions) != len(prices) or len(evidence) != len(prices)):
+        raise ValueError('Each dated session needs decisions and risk evidence')
+    tickers = {item.ticker for session in decisions for item in session}
+    if len(tickers) > 1:
+        raise ValueError('All sessions must belong to one ticker')
+    results = {}
+    for name, vote_weights in (('majority', None), ('weighted', weights)):
+        signals = []
+        for when, session, inputs in zip(prices.index, decisions, evidence, strict=True):
+            vote = consensus(session, weights=vote_weights)
+            risk = evaluate_risk(vote, inputs, limits, now=when.to_pydatetime())
+            available = {d.agent for d in session if d.status == 'completed' and d.reliable and not d.stale}
+            signals.append(risk.action if {'market', 'forecast'} <= available else 'NO_TRADE')
+        results[name] = {'signals': signals, 'backtest': backtest(
+            prices, signals, initial_cash=initial_cash, cost_bps=cost_bps)}
+    return results
 
 
 def evaluate_forecast(prices, forecaster, *, initial_window: int, horizon: int = 1, step: int = 1) -> dict:
