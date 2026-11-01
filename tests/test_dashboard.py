@@ -318,13 +318,33 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('id="tickers"', response.text)
         self.assertIn('EventSource', response.text)
 
-    def test_health_reports_status_message(self):
+    def test_health_reports_all_models_loaded_when_everything_is_ready(self):
         from unittest.mock import AsyncMock, patch
+        health = {'status': 'ready', 'version': '9.9', 'model': 'd3:2b'}
         with self.make_client() as client, \
-             patch('adam.dashboard.ollama_health', AsyncMock(return_value={'status': 'ready', 'version': '9.9', 'model': 'd3:2b'})):
+             patch('adam.dashboard.ollama_health', AsyncMock(return_value=health)):
             response = client.get('/api/health')
         self.assertEqual(response.status_code, 200)
-        self.assertIn('installed', response.json()['message'])
+        self.assertTrue(response.json()['ready'])
+        self.assertEqual(response.json()['message'], 'All models loaded')
+
+    def test_health_reports_model_and_extra_problems(self):
+        from unittest.mock import AsyncMock, patch
+        missing_model = {'status': 'missing_model', 'version': '9.9', 'model': 'd3:2b'}
+        ready = {'status': 'ready', 'version': '9.9', 'model': 'd3:2b'}
+        with self.make_client() as client, \
+             patch('adam.dashboard.ollama_health', AsyncMock(return_value=missing_model)), \
+             patch('adam.dashboard.importlib.util.find_spec', return_value=None):
+            response = client.get('/api/health')
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()['ready'])
+        self.assertIn('missing', response.json()['message'])
+        with self.make_client() as client, \
+             patch('adam.dashboard.ollama_health', AsyncMock(return_value=ready)), \
+             patch('adam.dashboard.importlib.util.find_spec', return_value=None):
+            response = client.get('/api/health')
+        self.assertFalse(response.json()['ready'])
+        self.assertIn('extras', response.json()['message'])
 
     def test_rejects_empty_and_excessive_ticker_lists(self):
         with self.make_client() as client:

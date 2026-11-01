@@ -480,6 +480,53 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         provider.assert_awaited_once()
         self.assertEqual(model.assess.await_count, 6)
 
+    async def test_news_provider_failure_fails_only_the_news_agent(self):
+        import tempfile
+        provider = AsyncMock(side_effect=RuntimeError('missing snapshot'))
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with tempfile.TemporaryDirectory() as directory:
+            coordinator = Coordinator(model, None, news_provider=provider, offline=True, snapshot_directory=directory)
+            result = await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['news'], 'failed')
+        self.assertEqual(result.errors['news'], 'missing snapshot')
+        self.assertEqual(result.agents['market'], 'failed')
+        self.assertIn('market_data', result.errors)
+
+    async def test_failed_benchmark_prevents_decision_reuse(self):
+        from datetime import datetime, timezone
+        from adam import cache
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        info = {'revenueGrowth': 0.1, 'mostRecentQuarter': int(datetime.now(timezone.utc).timestamp())}
+        frame = history([100.] * 40)
+        spy_calls = {'count': 0}
+
+        def fetch(ticker, period):
+            if ticker == 'SPY':
+                spy_calls['count'] += 1
+                if spy_calls['count'] > 1:
+                    raise RuntimeError('benchmark failed')
+            return frame
+
+        real_cached = cache.cached
+
+        def cached_without_spy(kind, key, ttl):
+            if (kind, key) == ('prices', 'SPY'):
+                return None
+            return real_cached(kind, key, ttl)
+
+        coordinator = Coordinator(model, None, cache_ttl_seconds=900)
+        with patch('adam.coordinator.fetch_history', side_effect=fetch), \
+             patch('adam.coordinator.fetch_fundamentals', return_value=info), \
+             patch('adam.cache.cached', cached_without_spy):
+            first = await coordinator.analyze('AAPL', RiskEvidence())
+            second = await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertTrue(first.decisions['market'].reliable)
+        self.assertFalse(second.decisions['market'].reliable)
+        self.assertEqual(second.errors['benchmark'], 'benchmark failed')
+        self.assertEqual(model.assess.await_count, 6)
+
     async def test_coordinator_risk_uses_observed_volatility_liquidity_and_forecast(self):
         from datetime import datetime, timezone
         from test_risk import EVIDENCE

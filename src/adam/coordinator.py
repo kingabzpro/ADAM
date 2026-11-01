@@ -99,6 +99,11 @@ class Coordinator:
             history, prices_version = self._fresh_snapshot(read_prices, ticker, ttl, 'prices')
         if want_info and info is None:
             info, info_version = self._fresh_snapshot(read_fundamentals, ticker, ttl, 'fundamentals')
+        if history is not None:
+            # Served without a fetch, so no save is attempted and an older save failure is not this run's error.
+            self.snapshot_errors.pop(('prices', ticker), None)
+        if want_info and info is not None:
+            self.snapshot_errors.pop(('fundamentals', ticker), None)
         if history is None or (want_info and info is None):
             if history is None:
                 try:
@@ -122,7 +127,10 @@ class Coordinator:
         """Resolve news evidence from the cache, a fresh snapshot, or the provider."""
         ttl = self.cache_ttl_seconds
         if self.offline or ttl <= 0:
-            return await self.news_provider(ticker), False, None
+            try:
+                return await self.news_provider(ticker), False, None
+            except Exception as error:
+                return error, False, None
         cached_news = cache.cached('news', ticker, ttl)
         if cached_news is not None:
             return cached_news[0], True, cached_news[1]
@@ -134,7 +142,8 @@ class Coordinator:
                 pass
             else:
                 if (datetime.now(timezone.utc) - saved).total_seconds() <= ttl:
-                    return evidence, True, cache.store('news', ticker, evidence, ttl)
+                    marked = {**evidence, 'source': 'local snapshot', 'snapshot_saved_at': saved.isoformat()}
+                    return marked, True, cache.store('news', ticker, marked, ttl)
         try:
             evidence = await self.news_provider(ticker)
         except Exception as error:
@@ -174,9 +183,11 @@ class Coordinator:
         timeline = []
         evidence_by_agent = {}
 
-        def emit(stage, status):
+        def emit(stage, status, error=None):
             event = {'time': datetime.now(timezone.utc).isoformat(), 'ticker': ticker,
                      'stage': stage, 'status': status}
+            if error is not None:
+                event['error'] = str(error)
             timeline.append(event)
             if on_event is not None:
                 try:
@@ -204,25 +215,37 @@ class Coordinator:
             except Exception as error:
                 agents[name] = "failed"
                 errors[name] = str(error)
-                emit(name, "failed")
+                emit(name, "failed", error)
 
         emit("market_data", "started")
+        data_task = asyncio.create_task(self._fetch_data(('data', ticker), self._load_data, ticker))
         benchmark_task = (None if ticker == 'SPY'
-                          else self._fetch_data(('prices', 'SPY'), lambda: self._load_data('SPY', want_info=False)))
-        news_task = self._load_news(ticker) if self.news_provider is not None else None
-        history, info, versions = await self._fetch_data(('data', ticker), self._load_data, ticker)
+                          else asyncio.create_task(self._fetch_data(('prices', 'SPY'), lambda: self._load_data('SPY', want_info=False))))
+        news_task = asyncio.create_task(self._load_news(ticker)) if self.news_provider is not None else None
+        try:
+            history, info, versions = await data_task
+        except Exception as error:
+            history, info, versions = error, error, (None, None)
         benchmark, benchmark_versions = None, (None, None)
         if benchmark_task is not None:
-            benchmark, _, benchmark_versions = await benchmark_task
+            try:
+                benchmark, _, benchmark_versions = await benchmark_task
+            except Exception as error:
+                benchmark, benchmark_versions = error, (None, None)
         news_loaded, news_from_cache, news_version = None, False, None
         if news_task is not None:
-            news_loaded, news_from_cache, news_version = await news_task
+            try:
+                news_loaded, news_from_cache, news_version = await news_task
+            except Exception as error:
+                news_loaded, news_from_cache, news_version = error, False, None
         if isinstance(history, Exception):
             errors["market_data"] = str(history)
-            emit("market_data", "failed")
+            emit("market_data", "failed", history)
             agents["market"] = agents["technical"] = "failed"
             if self.forecaster is not None:
                 agents["forecast"] = "failed"
+            for stage in ("benchmark", "market", "technical") + (("forecast",) if self.forecaster is not None else ()):
+                emit(stage, "skipped")
         else:
             emit("market_data", "completed")
 
@@ -287,7 +310,7 @@ class Coordinator:
                 evidence['comparison'] = None
                 evidence['comparison_status'] = 'unavailable'
                 errors['benchmark'] = str(error)
-                emit('benchmark', 'failed')
+                emit('benchmark', 'failed', error)
             return evidence
 
         async def market_stream():

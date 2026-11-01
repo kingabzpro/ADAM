@@ -23,8 +23,10 @@ from adam.snapshots import read_news
 HISTORY_PATH = Path.home() / '.adam' / 'history.sqlite'
 SNAPSHOT_DIRECTORY = Path.home() / '.adam' / 'snapshots'
 
-# Conservative built-in limits; supplied limits and per-ticker evidence are needed to approve trades (docs/risk-input.md).
-DEFAULT_LIMITS = RiskLimits(max_age_seconds=3600, max_volatility=0.5, max_downside=0.2,
+# Conservative built-in limits for portfolio-free research. Market data uses
+# daily bars, so freshness tolerates a weekend; supply your own limits to
+# tighten any threshold (docs/risk-input.md).
+DEFAULT_LIMITS = RiskLimits(max_age_seconds=4 * 86400, max_volatility=0.5, max_downside=0.2,
                             max_position_fraction=0.1, max_concentration=0.3, min_daily_dollar_volume=1000000,
                             max_correlated_exposure=0.4, min_reward_risk=2, max_transaction_cost_fraction=0.01,
                             max_loss_fraction=0.05)
@@ -144,8 +146,7 @@ def result_payload(row: dict) -> dict:
                  ('horizons', 'lower_returns', 'median_returns', 'upper_returns')}
     return {'ticker': row['ticker'], 'agents': row['agents'], 'signals': row['signals'], 'vote': row['vote'],
             'vote_display': row['vote_display'], 'action': row['action'], 'risk': row['risk'], 'errors': row['errors'],
-            'summary': evidence_summary(row['evidence']), 'forecast': quantiles, 'news_links': links,
-            'risk_inputs': row['risk_inputs'], 'evidence': row['evidence']}
+            'summary': evidence_summary(row['evidence']), 'forecast': quantiles, 'news_links': links}
 
 
 def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, history_path=HISTORY_PATH,
@@ -164,7 +165,15 @@ def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, 
     @app.get('/api/health')
     async def health():
         async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
-            return {'message': health_message(await ollama_health(client))}
+            status = await ollama_health(client)
+        if status['status'] != 'ready':
+            return {'ready': False, 'message': health_message(status)}
+        missing = [name for name, module in (('forecast', 'timestral'), ('sentiment', 'transformers'))
+                   if importlib.util.find_spec(module) is None]
+        if missing:
+            return {'ready': False, 'message': 'Ollama and d3:2b are ready, but the ' + ' and '.join(missing) +
+                    ' extras are missing. Run uv sync --extra forecast --extra sentiment.'}
+        return {'ready': True, 'message': 'All models loaded'}
 
     @app.get('/api/analysis')
     async def analysis(tickers: str):

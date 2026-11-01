@@ -23,10 +23,13 @@ def store(kind, key, value, ttl):
     if ttl <= 0:
         return None
     with _lock:
+        now = time.monotonic()
+        for slot in [slot for slot, entry in _entries.items() if entry[0] <= now]:
+            del _entries[slot]
         slot = (kind, key)
         version = _versions.get(slot, 0) + 1
         _versions[slot] = version
-        _entries[slot] = (time.monotonic() + ttl, value, version)
+        _entries[slot] = (now + ttl, value, version)
         return version
 
 
