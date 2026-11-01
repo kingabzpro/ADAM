@@ -624,7 +624,7 @@ adam/
 - [ ] Implement market decision agent.
 - [ ] Implement forecasting decision agent.
 - [ ] Implement news decision agent.
-  - Added source-attributed article extraction from one allowed publisher with headline fallback. Broader source coverage, relevance assessment, and event extraction remain outstanding.
+  - Added source-attributed article extraction from one allowed publisher, chunked sentiment, and extractive financial highlights with headline fallback. Broader source coverage, relevance assessment, and event extraction remain outstanding.
 - [ ] Implement technical decision agent.
 - [ ] Implement fundamental decision agent.
 - [x] Add independent category-level assessments.

@@ -68,7 +68,7 @@ def analyze_articles(records: list[dict], classifier) -> dict:
     from adam.sentiment import sentiment_evidence
 
     articles = []
-    unique_texts = []
+    chunks = []
     seen = set()
     for record in records:
         article = dict(record)
@@ -82,16 +82,33 @@ def analyze_articles(records: list[dict], classifier) -> dict:
             else:
                 seen.add(key)
                 article["status"] = "scored"
-                unique_texts.append(text)
+                normalized = ' '.join(text.split())
+                article['text_truncated'] = len(normalized) > 20000
+                normalized = normalized[:20000]
+                pieces = [normalized[i:i + 800] for i in range(0, len(normalized), 800)]
+                article['sentiment_chunks'] = len(pieces)
+                chunks.extend(pieces)
         articles.append(article)
-    if not unique_texts:
+    if not chunks:
         return {"articles": articles, "scored_count": 0, "mean_scores": None}
-    evidence = sentiment_evidence(unique_texts, classifier)
+    evidence = sentiment_evidence(chunks, classifier)
     sentiments = iter(evidence["articles"])
+    scores = []
     for article in articles:
         if article["status"] == "scored":
-            article["sentiment"] = next(sentiments)
-    return {"articles": articles, "scored_count": len(unique_texts), "mean_scores": evidence["mean_scores"]}
+            group = [next(sentiments)['scores'] for _ in range(article['sentiment_chunks'])]
+            averaged = {label: sum(item[label] for item in group) / len(group) for label in ('positive', 'neutral', 'negative')}
+            article['sentiment'] = {'label': max(averaged, key=averaged.get), 'scores': averaged}
+            scores.append(averaged)
+    return {"articles": articles, "scored_count": len(scores),
+            "mean_scores": {label: sum(item[label] for item in scores) / len(scores) for label in ('positive', 'neutral', 'negative')}}
+
+
+def financial_highlights(text):
+    sentences = re.split(r'(?<=[.!?])\s+', ' '.join(text.split()))
+    pattern = re.compile(r'\b(revenue|earnings|profit|loss|margin|cash flow|sales|debt|dividend|guidance)\b', re.I)
+    return [sentence for sentence in sentences if len(sentence) <= 240 and pattern.search(sentence)
+            and re.search(r'\d', sentence)][:3]
 
 
 async def article_evidence(ticker, client, classifier, *, now=None):
@@ -152,7 +169,7 @@ async def article_evidence(ticker, client, classifier, *, now=None):
         if not text or not re.search(r'(?<![A-Za-z0-9])' + re.escape(symbol) + r'(?![A-Za-z0-9])', text):
             continue
         records.append({'title': item['title'], 'url': candidates[0], 'published': item['published'],
-                        'source': url.hostname, 'text': text[:20000]})
+                        'source': url.hostname, 'text': text})
         if len(records) >= 5:
             break
     result = await asyncio.to_thread(analyze_articles, records, classifier)
@@ -161,9 +178,10 @@ async def article_evidence(ticker, client, classifier, *, now=None):
         if article['status'] == 'scored':
             text = article.pop('text')
             article['summary'] = ' '.join(text.split())[:300]
+            article['financial_highlights'] = financial_highlights(text[:20000])
             articles.append(article)
     return {'basis': 'articles', 'articles': articles, 'mean_scores': result['mean_scores'],
-            'note': 'Limited publisher coverage; FinBERT scores the beginning of each article. Ticker mention does not guarantee relevance.'}
+            'note': 'Limited publisher coverage; article text is capped and FinBERT may truncate chunks. Ticker mention does not guarantee relevance.'}
 
 
 async def news_evidence(ticker, client, classifier):
@@ -220,10 +238,11 @@ def compact_news_evidence(evidence):
     if evidence['basis'] == 'articles':
         return {'basis': 'articles', 'total_articles': len(evidence['articles']),
                 'articles': [{'title': item.get('title', '')[:200], 'summary': item.get('summary', '')[:300],
-                              'published': item.get('published'), 'sentiment': item.get('sentiment', {}).get('label')}
+                              'published': item.get('published'), 'sentiment': item.get('sentiment', {}).get('label'),
+                              'financial_highlights': [s for s in item.get('financial_highlights', []) if len(s) <= 180][:1]}
                              for item in evidence['articles'][:5]],
                 'mean_scores': {name: round(value, 4) for name, value in evidence['mean_scores'].items()},
-                'note': 'Limited publisher coverage; sentiment covers article beginnings and ticker mention does not guarantee relevance.'}
+                'note': 'Limited publisher coverage; text and chunks may be truncated. Ticker mention does not guarantee relevance.'}
     # shortcut: D3 sees at most 10 shortened titles; increase after context budgeting is measured.
     headlines = evidence['headlines']
     return {
