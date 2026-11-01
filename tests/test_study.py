@@ -5,7 +5,8 @@ from unittest.mock import AsyncMock
 import pandas as pd
 
 from adam.study import (buy_and_hold_signals, decision_dates, directional_accuracy, ledger,
-                        run_weekly_study, sma_signals, summarize, weekly_signal_series)
+                        next_week_returns, run_weekly_study, sma_signals, summarize,
+                        weekly_signal_series, window)
 from test_decisions import decision
 
 
@@ -86,6 +87,20 @@ class StudyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(series), len(frame))
         self.assertEqual(series[2], 'BUY')
         self.assertEqual(series[0], 'NO_TRADE')
+
+    def test_metrics_are_independent_of_bar_timestamps(self):
+        # Real Yahoo daily bars carry intraday stamps; every date-based lookup must still hit.
+        frame = make_frame(100., 1.)
+        frame.index = frame.index + pd.Timedelta(hours=14, minutes=30)
+        weeks = decision_dates(frame.index, '2026-02-02', '2026-03-31')
+        sliced = window(frame, weeks[-1])
+        self.assertEqual(sliced.index[-1].date().isoformat(), weeks[-1].date().isoformat())
+        self.assertEqual(len(sliced), 40)
+        signals = sma_signals(frame, weeks)
+        self.assertEqual(signals[weeks[-1].date().isoformat()], 'BUY')
+        returns = next_week_returns(frame, weeks)
+        self.assertEqual(len(returns), 7)
+        self.assertTrue(all(value > 0 for value in returns.values()))
 
     def test_directional_accuracy_counts_only_directed_signals(self):
         returns = {'2026-02-06': .01, '2026-02-13': -.02, '2026-02-20': .03, '2026-02-27': .05}

@@ -37,8 +37,9 @@ def decision_dates(calendar, start, end):
 
 
 def window(frame, week_end):
-    """Return the point-in-time price window ending at week_end (inclusive)."""
-    return frame.loc[:week_end].tail(WINDOW_SESSIONS)
+    """Return the point-in-time price window ending at week_end (inclusive), matched by date."""
+    key = pd.Timestamp(week_end).date()
+    return frame[[stamp.date() <= key for stamp in frame.index]].tail(WINDOW_SESSIONS)
 
 
 def signal_at_week(result):
@@ -103,11 +104,12 @@ def buy_and_hold_signals(frame):
 
 
 def sma_signals(frame, weeks, window=SMA_SESSIONS):
-    """Trailing moving-average rule sampled at the weekly decision dates."""
-    close = frame['Close']
+    """Trailing moving-average rule sampled at the weekly decision dates (date-matched)."""
+    close = frame['Close'].copy()
+    close.index = [stamp.date() for stamp in close.index]
     signals = {}
     for stamp in weeks:
-        history = close.loc[:stamp].tail(window + 1)
+        history = close.loc[:stamp.date()].tail(window + 1)
         if len(history) <= window:
             continue
         average = float(history.iloc[:-1].mean())
@@ -117,12 +119,13 @@ def sma_signals(frame, weeks, window=SMA_SESSIONS):
 
 
 def next_week_returns(frame, weeks):
-    """Close-to-close return from each decision date to the next one."""
-    close = frame['Close']
+    """Close-to-close return from each decision date to the next one (date-matched)."""
+    close_by_date = {stamp.date(): float(value) for stamp, value in frame['Close'].items()}
     returns = {}
     for index in range(len(weeks) - 1):
-        if weeks[index] in close.index and weeks[index + 1] in close.index:
-            returns[weeks[index].date().isoformat()] = float(close.loc[weeks[index + 1]] / close.loc[weeks[index]] - 1)
+        current, following = weeks[index].date(), weeks[index + 1].date()
+        if current in close_by_date and following in close_by_date:
+            returns[current.isoformat()] = close_by_date[following] / close_by_date[current] - 1
     return returns
 
 
