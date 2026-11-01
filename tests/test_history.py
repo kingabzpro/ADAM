@@ -28,6 +28,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(records[0]['evidence']['market']['last_close'], 100.0)
             self.assertEqual(records[0]['timeline'][-1]['stage'], 'risk')
             self.assertIsNone(records[0]['limits'])
+            self.assertIn('evaluated_risk_evidence', records[0])
             self.assertEqual(read_history(path, ticker='MSFT'), [])
 
     async def test_invalid_limit_does_not_touch_storage(self):

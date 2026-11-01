@@ -14,6 +14,7 @@ def record_analysis(path, result, *, risk_evidence, limits):
         'decisions': {name: decision.model_dump(mode='json') for name, decision in result.decisions.items()},
         'risk': result.risk.model_dump(mode='json'),
         'risk_evidence': risk_evidence.model_dump(mode='json'),
+        'evaluated_risk_evidence': getattr(result, 'evaluated_risk_evidence', risk_evidence).model_dump(mode='json'),
         'limits': limits.model_dump(mode='json') if limits is not None else None,
         'errors': result.errors,
         'timeline': result.timeline,

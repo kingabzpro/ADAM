@@ -200,3 +200,29 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 await coordinator.benchmark_history()
             self.assertIs(await coordinator.benchmark_history(), frame)
             self.assertEqual(fetch.call_count, 2)
+
+    async def test_actual_market_date_cannot_be_overridden_by_newer_user_timestamp(self):
+        from datetime import datetime, timezone
+        from test_risk import EVIDENCE
+        current = datetime.now(timezone.utc)
+        data = RiskEvidence(**(EVIDENCE | {'market_time': current}))
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            result = await Coordinator(model, LIMITS).analyze('AAPL', data)
+        self.assertEqual(result.risk.status, 'fail')
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+        self.assertIn('market_time', result.risk.reasons)
+        self.assertLess(result.evaluated_risk_evidence.market_time, current)
+
+    async def test_older_user_timestamp_and_missing_timestamp_are_preserved(self):
+        from datetime import datetime, timezone
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        older = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            coordinator = Coordinator(model, None)
+            result = await coordinator.analyze('AAPL', RiskEvidence(market_time=older))
+            missing = await coordinator.analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.evaluated_risk_evidence.market_time, older)
+        self.assertIsNone(missing.evaluated_risk_evidence.market_time)

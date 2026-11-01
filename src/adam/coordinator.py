@@ -21,6 +21,7 @@ class AnalysisResult:
     errors: dict[str, str]
     timeline: list[dict[str, str]]
     evidence: dict[str, dict]
+    evaluated_risk_evidence: RiskEvidence
 
 
 class Coordinator:
@@ -142,7 +143,14 @@ class Coordinator:
         if self.news_provider is not None:
             tasks.append(run('news', news))
         await asyncio.gather(*tasks)
-        result = (evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
+        evaluated_risk = risk_evidence
+        market = evidence_by_agent.get('market')
+        if market and risk_evidence.market_time is not None:
+            observed_time = datetime.fromisoformat(market['as_of'])
+            evaluated_risk = risk_evidence.model_copy(update={
+                'market_time': min(risk_evidence.market_time, observed_time),
+            })
+        result = (evaluate_risk(consensus(list(decisions.values())), evaluated_risk, self.limits)
                   if self.limits is not None else RiskResult(status="insufficient_evidence", action="NO_TRADE", reasons=("risk_limits",)))
         missing_critical = tuple(f"{name}_decision" for name in ("market", "forecast")
                                  if name not in decisions or not decisions[name].reliable or decisions[name].stale)
@@ -150,4 +158,4 @@ class Coordinator:
             result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
                                 reasons=result.reasons + missing_critical)
         emit("risk", result.action)
-        return AnalysisResult(ticker, agents, decisions, result, errors, timeline, evidence_by_agent)
+        return AnalysisResult(ticker, agents, decisions, result, errors, timeline, evidence_by_agent, evaluated_risk)
