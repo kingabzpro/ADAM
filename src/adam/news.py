@@ -91,3 +91,39 @@ def analyze_articles(records: list[dict], classifier) -> dict:
         if article["status"] == "scored":
             article["sentiment"] = next(sentiments)
     return {"articles": articles, "scored_count": len(unique_texts), "mean_scores": evidence["mean_scores"]}
+
+
+async def headline_evidence(ticker, client, classifier, *, now=None, max_age_days=7, limit=20):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    from adam.sentiment import sentiment_evidence
+
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError('now must be timezone-aware')
+    if type(max_age_days) is not int or max_age_days < 1 or type(limit) is not int or limit < 1:
+        raise ValueError('Age and limit must be positive integers')
+    items = await discover_news(ticker, client)
+    selected, seen = [], set()
+    for item in items:
+        title = (item.get('title') or '').strip()
+        key = ' '.join(title.casefold().split())
+        try:
+            published = datetime.fromisoformat(item.get('published') or '')
+            age = now - published
+        except (ValueError, TypeError):
+            continue
+        if not title or key in seen or age < timedelta(0) or age > timedelta(days=max_age_days):
+            continue
+        seen.add(key)
+        if len(selected) < limit:
+            selected.append(dict(item))
+    if not selected:
+        return {'basis': 'headlines', 'headlines': [], 'mean_scores': None, 'excluded_count': len(items)}
+    scored = await asyncio.to_thread(sentiment_evidence, [item['title'] for item in selected], classifier)
+    for item, sentiment in zip(selected, scored['articles'], strict=True):
+        item['sentiment'] = sentiment
+    return {'basis': 'headlines', 'headlines': selected, 'mean_scores': scored['mean_scores'],
+            'excluded_count': len(items) - len(selected),
+            'note': 'Search results may be unrelated; sentiment covers headlines, not full articles.'}
