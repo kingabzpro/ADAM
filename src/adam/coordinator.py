@@ -19,6 +19,7 @@ class AnalysisResult:
     risk: RiskResult
     errors: dict[str, str]
     timeline: list[dict[str, str]]
+    evidence: dict[str, dict]
 
 
 class Coordinator:
@@ -40,6 +41,7 @@ class Coordinator:
         decisions = {}
         errors = {}
         timeline = []
+        evidence_by_agent = {}
 
         def emit(stage, status):
             event = {'time': datetime.now(timezone.utc).isoformat(), 'ticker': ticker,
@@ -55,6 +57,7 @@ class Coordinator:
             emit(name, "started")
             try:
                 evidence = await compute()
+                evidence_by_agent[name] = evidence
                 async with self.inference_slots:
                     result = await self.model.assess(ticker, name, evidence)
                 if result.ticker != ticker or result.agent != name or result.status != "completed":
@@ -121,4 +124,4 @@ class Coordinator:
             result = RiskResult(status="insufficient_evidence", action="NO_TRADE",
                                 reasons=result.reasons + missing_critical)
         emit("risk", result.action)
-        return AnalysisResult(ticker, agents, decisions, result, errors, timeline)
+        return AnalysisResult(ticker, agents, decisions, result, errors, timeline, evidence_by_agent)

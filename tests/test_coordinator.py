@@ -129,3 +129,12 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
             result = await Coordinator(model, None, news_provider=provider).analyze('AAPL', RiskEvidence())
         self.assertEqual(result.agents['news'], 'failed')
         model.assess.assert_not_awaited()
+
+    async def test_evidence_is_preserved_even_when_model_fails(self):
+        model = AsyncMock()
+        model.assess.side_effect = RuntimeError('model offline')
+        with patch('adam.coordinator.fetch_history', return_value=history([100.] * 40)):
+            result = await Coordinator(model, None).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['market'], 'failed')
+        self.assertEqual(result.evidence['market']['last_close'], 100.0)
+        self.assertEqual(result.evidence['technical']['sma_20'], 100.0)
