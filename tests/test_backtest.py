@@ -25,6 +25,14 @@ class BacktestTests(unittest.TestCase):
         self.assertAlmostEqual(result['ending_equity'], 110)
         self.assertGreaterEqual(result['max_drawdown'], 0)
 
+    def test_position_fraction_limits_cash_invested_at_next_open(self):
+        result = backtest(self.prices(), ['BUY', 'SELL', 'HOLD', 'HOLD'],
+                          initial_cash=100, cost_bps=100, position_fractions=[0.1, 0, 0, 0])
+        self.assertAlmostEqual(result['trades'][0]['shares'], 10 / (10 * 1.01))
+        self.assertAlmostEqual(result['ending_equity'], 90 + 10 / 1.01 * 1.2 * .99)
+        with self.assertRaises(ValueError):
+            backtest(self.prices(), ['BUY'] * 4, position_fractions=[1.1] * 4)
+
     def test_bad_inputs_rejected(self):
         for frame, signals, kwargs in [
             (self.prices().iloc[::-1], ['BUY'] * 4, {}),

@@ -18,7 +18,7 @@ class VotingEvaluationTests(unittest.TestCase):
                                 weights={'market': 1, 'forecast': 1, 'news': 3})
         self.assertEqual(result['majority']['signals'], ['BUY'] * 3)
         self.assertEqual(result['weighted']['signals'], ['SELL'] * 3)
-        self.assertAlmostEqual(result['majority']['backtest']['ending_equity'], 12000)
+        self.assertAlmostEqual(result['majority']['backtest']['ending_equity'], 10100)
         self.assertAlmostEqual(result['weighted']['backtest']['ending_equity'], 10000)
 
     def test_missing_critical_or_risk_evidence_fails_closed(self):

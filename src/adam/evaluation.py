@@ -30,7 +30,8 @@ def compare_voting(prices, decisions, evidence, limits, *, weights, initial_cash
             available = {d.agent for d in session if d.status == 'completed' and d.reliable and not d.stale}
             signals.append(risk.action if {'market', 'forecast'} <= available else 'NO_TRADE')
         results[name] = {'signals': signals, 'backtest': backtest(
-            prices, signals, initial_cash=initial_cash, cost_bps=cost_bps)}
+            prices, signals, initial_cash=initial_cash, cost_bps=cost_bps,
+            position_fractions=[item.position_fraction or 0 for item in evidence])}
     return results
 
 

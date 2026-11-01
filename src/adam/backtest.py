@@ -4,11 +4,12 @@ import numpy as np
 import pandas as pd
 
 
-def backtest(prices, signals, *, initial_cash=10000.0, cost_bps=0.0):
+def backtest(prices, signals, *, initial_cash=10000.0, cost_bps=0.0, position_fractions=None):
     """Simulate long/cash trades at the open after each close-time signal.
 
     Inputs must be point-in-time, consistently adjusted prices and risk-gated signals.
-    Positions are marked to the final close; open positions are not liquidated.
+    A position fraction is the fraction of available cash committed on entry,
+    including fees. Positions are marked to the final close, not liquidated.
     """
     if (len(prices) < 2 or not {'Open', 'Close'}.issubset(prices.columns)
             or not isinstance(prices.index, pd.DatetimeIndex) or prices.index.tz is None
@@ -20,6 +21,12 @@ def backtest(prices, signals, *, initial_cash=10000.0, cost_bps=0.0):
             or not isfinite(initial_cash) or not isfinite(cost_bps)
             or initial_cash <= 0 or not 0 <= cost_bps < 10000):
         raise ValueError('Invalid initial cash or transaction cost')
+    if position_fractions is None:
+        position_fractions = [1.0] * len(prices)
+    if (len(position_fractions) != len(prices) or any(
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            or not isfinite(value) or not 0 <= value <= 1 for value in position_fractions)):
+        raise ValueError('A valid position fraction is required for every session')
     try:
         data = prices[['Open', 'Close']].apply(pd.to_numeric, errors='raise').astype(float)
     except (TypeError, ValueError) as error:
@@ -36,19 +43,20 @@ def backtest(prices, signals, *, initial_cash=10000.0, cost_bps=0.0):
         signal = signals[i - 1]
         open_price = float(data['Open'].iloc[i])
         date = data.index[i].date().isoformat()
-        if signal == 'BUY' and shares == 0:
-            shares = cash / (open_price * (1 + rate))
+        allocation = cash * position_fractions[i - 1]
+        if signal == 'BUY' and shares == 0 and allocation > 0:
+            shares = allocation / (open_price * (1 + rate))
             fee = shares * open_price * rate
-            purchase_cost = cash
-            cash = 0.0
+            purchase_cost = allocation
+            cash -= allocation
             total_costs += fee
             trades.append({'date': date, 'side': 'BUY', 'price': open_price, 'shares': shares, 'fee': fee})
         elif signal == 'SELL' and shares > 0:
             proceeds = shares * open_price
             fee = proceeds * rate
-            cash = proceeds - fee
+            cash += proceeds - fee
             total_costs += fee
-            closed_profits.append(cash - purchase_cost)
+            closed_profits.append(proceeds - fee - purchase_cost)
             trades.append({'date': date, 'side': 'SELL', 'price': open_price, 'shares': shares, 'fee': fee})
             shares = 0.0
         equity.append(cash + shares * float(data['Close'].iloc[i]))
