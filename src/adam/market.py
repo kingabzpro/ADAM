@@ -2,12 +2,15 @@ import asyncio
 
 import yfinance as yf
 
+from adam.yahoo import yahoo_request
+
 
 def fetch_history(ticker: str, period: str = "1mo"):
     ticker = ticker.strip().upper()
     if not ticker:
         raise ValueError("Ticker must not be blank")
-    return yf.Ticker(ticker).history(period=period, interval="1d", raise_errors=True)
+    source = yf.Ticker(ticker)
+    return yahoo_request(lambda: source.history(period=period, interval="1d", raise_errors=True))
 
 async def fetch_many(tickers: list[str], concurrency: int = 4):
     if type(concurrency) is not int or concurrency < 1:

@@ -3,6 +3,8 @@ from math import isfinite
 
 import yfinance as yf
 
+from adam.yahoo import yahoo_request
+
 FIELDS = {
     "revenue_growth": "revenueGrowth", "earnings_growth": "earningsGrowth",
     "profit_margin": "profitMargins", "operating_margin": "operatingMargins",
@@ -17,7 +19,8 @@ def fetch_fundamentals(ticker: str) -> dict:
     ticker = ticker.strip().upper()
     if not ticker:
         raise ValueError("Ticker must not be blank")
-    return yf.Ticker(ticker).get_info()
+    source = yf.Ticker(ticker)
+    return yahoo_request(source.get_info)
 
 
 def fundamentals_evidence(info: dict, *, now: datetime | None = None) -> dict:

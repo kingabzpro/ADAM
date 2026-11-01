@@ -15,6 +15,7 @@ name = "adam"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "curl-cffi" },
     { name = "defusedxml" },
     { name = "httpx" },
     { name = "nicegui" },
@@ -35,6 +36,7 @@ sentiment = [
 
 [package.metadata]
 requires-dist = [
+    { name = "curl-cffi", specifier = ">=0.15" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "nicegui", specifier = ">=3.18.0" },

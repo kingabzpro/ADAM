@@ -6,7 +6,7 @@ Run the offline unit suite from the project root:
 uv run python -m unittest discover -s tests
 ```
 
-The suite uses mocked model and network calls; it does not install Ollama or download weights. To verify real D3 inference, first run `uv run adam-setup`, then enable the opt-in local test.
+The suite mocks model and external network calls and includes a local loopback HTTP retry test; it does not install Ollama or download weights. To verify real D3 inference, first run `uv run adam-setup`, then enable the opt-in local test.
 
 **macOS / Linux**
 
@@ -27,6 +27,8 @@ This check requires the local Ollama server and `d3:2b` model. It runs inference
 Run a live multi-ticker coordinator benchmark with `uv run adam-benchmark --tickers AAPL,MSFT,NVDA,AMZN --concurrency 2`. It fetches current Yahoo data and runs the market, technical, and fundamentals agents through D3, with one D3 request at a time. Forecast and news are disabled; risk inputs are absent, so results are No Trade. It reports successful per-ticker latency percentiles, throughput, agent status, and failures. Times include network access and are not model-only measurements. Use more tickers and repeated runs for meaningful tail latency; this is not a quality or trading-performance test.
 
 Each coordinator allows four concurrent Yahoo price or fundamentals calls by default. Concurrent requests for the same ticker and data type share one in-flight call; online analysis does not reuse completed calls except for the short-lived SPY benchmark cache. Separate local snapshots support offline research. Cancelling a waiting analysis does not stop a shared call already running in a thread.
+
+Yahoo price and fundamentals requests retry once after a short randomized delay for selected connection and timeout failures. Rate limits, certificate errors, invalid requests, and other failures are not retried. A failed retry is reported to the relevant agent and cannot supply fresh evidence.
 
 `adam.evaluation.evaluate_forecast` evaluates a forecaster over expanding historical windows. It reports model and last-price baseline MAE/RMSE, direction accuracy, and empirical 10th/90th quantile and interval coverage. Direction accuracy excludes unchanged actual prices; a flat forecast counts as incorrect when the price moves. Coverage counts observations on interval boundaries as inside, allowing for floating-point reconstruction error. `step` and `horizon` determine the sample spacing; overlapping horizons are not independent. Provide point-in-time, consistently adjusted prices and account for the model's training period: the function cannot verify either condition, and small samples do not establish calibration or profitability.
 
