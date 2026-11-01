@@ -26,24 +26,46 @@ class AnalysisResult:
 
 
 class Coordinator:
-    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, news_provider=None, inference_concurrency: int = 1):
+    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, news_provider=None, inference_concurrency: int = 1, data_concurrency: int = 4):
         if type(inference_concurrency) is not int or inference_concurrency < 1:
             raise ValueError("inference_concurrency must be a positive integer")
+        if type(data_concurrency) is not int or data_concurrency < 1:
+            raise ValueError("data_concurrency must be a positive integer")
         self.model = model
         self.limits = limits
         self.forecaster = forecaster
         self.news_provider = news_provider
         self.inference_slots = asyncio.Semaphore(inference_concurrency)
         self.forecast_slot = asyncio.Semaphore(1)
+        self.data_slots = asyncio.Semaphore(data_concurrency)
+        self._data_tasks = {}
         self._benchmark_task = None
         self._benchmark_started = 0.0
+
+    async def _fetch_data(self, key, function, *args):
+        task = self._data_tasks.get(key)
+        if task is None or task.done():
+            async def fetch():
+                async with self.data_slots:
+                    return await asyncio.to_thread(function, *args)
+            task = asyncio.create_task(fetch())
+            self._data_tasks[key] = task
+
+            def finished(done):
+                if self._data_tasks.get(key) is done:
+                    del self._data_tasks[key]
+                if not done.cancelled():
+                    done.exception()
+            task.add_done_callback(finished)
+        return await asyncio.shield(task)
 
     async def benchmark_history(self):
         task = self._benchmark_task
         if (task is None or (task.done() and (task.cancelled() or task.exception() is not None
                                                or time.monotonic() - self._benchmark_started > 60))):
             self._benchmark_started = time.monotonic()
-            task = asyncio.create_task(asyncio.to_thread(fetch_history, 'SPY', '3mo'))
+            task = asyncio.create_task(self._fetch_data(('prices', 'SPY'), fetch_history, 'SPY', '3mo'))
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
             self._benchmark_task = task
         return await asyncio.shield(task)
 
@@ -88,7 +110,7 @@ class Coordinator:
                 emit(name, "failed")
 
         async def fundamentals():
-            info = await asyncio.to_thread(fetch_fundamentals, ticker)
+            info = await self._fetch_data(('fundamentals', ticker), fetch_fundamentals, ticker)
             evidence = fundamentals_evidence(info)
             if not evidence["metrics"] or evidence["freshness"] != "current":
                 raise ValueError("Fundamentals missing or fiscal quarter date stale or unknown")
@@ -97,7 +119,7 @@ class Coordinator:
         async def market_stream():
             emit("market_data", "started")
             try:
-                history = await asyncio.to_thread(fetch_history, ticker, "3mo")
+                history = await self._fetch_data(('prices', ticker), fetch_history, ticker, '3mo')
             except Exception as error:
                 errors["market_data"] = str(error)
                 emit("market_data", "failed")

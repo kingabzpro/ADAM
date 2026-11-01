@@ -14,6 +14,54 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.patch_fundamentals.start()
         self.addCleanup(self.patch_fundamentals.stop)
 
+    async def test_data_requests_share_inflight_work_and_survive_one_cancellation(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        ready, release = asyncio.Event(), asyncio.Event()
+        async def fetch(*args):
+            ready.set()
+            await release.wait()
+            return 'data'
+        coordinator = Coordinator(AsyncMock(), None)
+        with patch('adam.coordinator.asyncio.to_thread', side_effect=fetch) as run:
+            first = asyncio.create_task(coordinator._fetch_data(('prices', 'AAPL'), object()))
+            await ready.wait()
+            second = asyncio.create_task(coordinator._fetch_data(('prices', 'AAPL'), object()))
+            await asyncio.sleep(0)
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            release.set()
+            self.assertEqual(await second, 'data')
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(await coordinator._fetch_data(('prices', 'AAPL'), object()), 'data')
+            self.assertEqual(run.call_count, 2)
+
+    async def test_data_workers_are_bounded_and_failed_work_retries(self):
+        import asyncio
+        from unittest.mock import AsyncMock
+        active = maximum = 0
+        async def fetch(function, name):
+            nonlocal active, maximum
+            active += 1
+            maximum = max(maximum, active)
+            try:
+                await asyncio.sleep(.01)
+                if name == 'bad':
+                    raise RuntimeError('offline')
+                return name
+            finally:
+                active -= 1
+        coordinator = Coordinator(AsyncMock(), None, data_concurrency=2)
+        with patch('adam.coordinator.asyncio.to_thread', side_effect=fetch) as run:
+            results = await asyncio.gather(*(coordinator._fetch_data(('prices', name), object(), name)
+                                             for name in ['a', 'b', 'c', 'bad']), return_exceptions=True)
+            self.assertEqual(maximum, 2)
+            self.assertIsInstance(results[-1], RuntimeError)
+            with self.assertRaises(RuntimeError):
+                await coordinator._fetch_data(('prices', 'bad'), object(), 'bad')
+            self.assertEqual(run.call_count, 5)
+
     async def test_runs_available_agents_and_applies_risk_gate(self):
         model = AsyncMock()
         async def assess(ticker, agent, evidence):
