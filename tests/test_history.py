@@ -25,6 +25,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(records[0]['ticker'], 'AAPL')
             self.assertEqual(records[0]['risk']['action'], 'NO_TRADE')
             self.assertEqual(records[0]['decisions']['market']['signal'], 'BUY')
+            self.assertEqual(records[0]['evidence']['market']['last_close'], 100.0)
             self.assertEqual(records[0]['timeline'][-1]['stage'], 'risk')
             self.assertIsNone(records[0]['limits'])
             self.assertEqual(read_history(path, ticker='MSFT'), [])
@@ -39,7 +40,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_serialization_failure_does_not_create_database(self):
         from types import SimpleNamespace
         from adam.risk import RiskResult
-        result = SimpleNamespace(ticker='AAPL', agents={}, decisions={}, errors={'invalid': float('nan')}, timeline=[], risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('missing',)))
+        result = SimpleNamespace(ticker='AAPL', agents={}, decisions={}, evidence={}, errors={'invalid': float('nan')}, timeline=[], risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('missing',)))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'history.sqlite'
             with self.assertRaises(ValueError):
@@ -49,7 +50,7 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
     async def test_creates_missing_history_directory(self):
         from types import SimpleNamespace
         from adam.risk import RiskResult
-        result = SimpleNamespace(ticker='AAPL', agents={}, decisions={}, errors={}, timeline=[], risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('missing',)))
+        result = SimpleNamespace(ticker='AAPL', agents={}, decisions={}, evidence={}, errors={}, timeline=[], risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('missing',)))
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'nested' / 'history.sqlite'
             record_analysis(path, result, risk_evidence=RiskEvidence(), limits=None)

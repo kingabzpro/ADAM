@@ -10,6 +10,7 @@ def record_analysis(path, result, *, risk_evidence, limits):
     payload = {
         'ticker': result.ticker,
         'agents': result.agents,
+        'evidence': result.evidence,
         'decisions': {name: decision.model_dump(mode='json') for name, decision in result.decisions.items()},
         'risk': result.risk.model_dump(mode='json'),
         'risk_evidence': risk_evidence.model_dump(mode='json'),
