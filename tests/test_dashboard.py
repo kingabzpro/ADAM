@@ -180,6 +180,8 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(path == '/v1/systemone' for path in calls))
         self.assertIn('market: BUY', rows[0]['agents'])
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
+        self.assertEqual(rows[0]['signals']['market']['probabilities'], {'BUY': 0.7, 'HOLD': 0.2, 'SELL': 0.1})
+        self.assertEqual(rows[0]['signals']['market']['confidence'], 0.7)
 
     async def test_news_uses_one_shared_client_per_run(self):
         import httpx
@@ -317,6 +319,14 @@ class DashboardServerTests(unittest.TestCase):
         self.assertIn('ADAM', response.text)
         self.assertIn('id="tickers"', response.text)
         self.assertIn('EventSource', response.text)
+        self.assertEqual(response.headers['cache-control'], 'no-cache')
+
+    def test_favicon_is_served(self):
+        with self.make_client() as client:
+            response = client.get('/favicon.ico')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers['content-type'], 'image/svg+xml')
+        self.assertIn('<svg', response.text)
 
     def test_health_reports_all_models_loaded_when_everything_is_ready(self):
         from unittest.mock import AsyncMock, patch

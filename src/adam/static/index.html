@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#05070d">
+<link rel="icon" type="image/svg+xml" href="/favicon.ico">
 <title>ADAM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -184,6 +185,7 @@
   .status.done { color: #67d992; }
   .status.done .icon { background: var(--buy); }
   .status.failed { color: var(--danger); }
+  .stage-probs { flex-basis: 100%; font-size: 10.5px; color: var(--muted); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
   .status.failed .icon { background: var(--sell); }
   .verdict {
     display: inline-flex; align-items: center; justify-content: center; min-width: 62px;
@@ -559,8 +561,21 @@
       const payload = JSON.parse(event.data);
       Object.entries(payload.signals).forEach(([name, signal]) => {
         if (signal.signal === null) setStage(payload.ticker, name, 'flat', signal.status || 'unavailable', 'flat');
-        else setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
-                      verdictClass(signal.signal));
+        else {
+          setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
+                   verdictClass(signal.signal));
+          const probs = signal.probabilities;
+          if (probs) {
+            const row = document.getElementById('stage-' + payload.ticker + '-' + name);
+            if (row) {
+              const line = document.createElement('div');
+              line.className = 'stage-probs';
+              line.textContent = ['BUY', 'HOLD', 'SELL'].map((choice) =>
+                choice + ' ' + Math.round((probs[choice] || 0) * 100) + '%').join('   ');
+              row.appendChild(line);
+            }
+          }
+        }
       });
       resultsSection.classList.remove('hidden');
       resultsList.appendChild(resultCard(payload));

@@ -68,11 +68,13 @@ def agent_signals(result) -> dict:
     for name, status in result.agents.items():
         decision = result.decisions.get(name)
         if decision is None:
-            signals[name] = {'signal': None, 'confidence': None, 'abstained': True, 'status': status}
+            signals[name] = {'signal': None, 'confidence': None, 'abstained': True, 'status': status,
+                             'probabilities': None}
         else:
             signals[name] = {'signal': decision.signal, 'confidence': max(decision.probabilities.values()),
                              'abstained': not decision.reliable or decision.stale or decision.status != "completed",
-                             'status': status}
+                             'status': status,
+                             'probabilities': {name: decision.probabilities[name] for name in ('BUY', 'HOLD', 'SELL')}}
     return signals
 
 
@@ -160,7 +162,13 @@ def create_app(config, *, offline=False, snapshot_directory=SNAPSHOT_DIRECTORY, 
 
     @app.get('/')
     async def serve_page():
-        return FileResponse(page)
+        # no-cache keeps the UI in sync with code changes; browsers otherwise heuristically cache the page.
+        return FileResponse(page, headers={'Cache-Control': 'no-cache'})
+
+    @app.get('/favicon.ico')
+    async def favicon():
+        icon = Path(__file__).parent / 'static' / 'favicon.svg'
+        return FileResponse(icon, media_type='image/svg+xml', headers={'Cache-Control': 'max-age=86400'})
 
     @app.get('/api/health')
     async def health():
