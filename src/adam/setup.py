@@ -13,6 +13,7 @@ from adam.d3 import DEFAULT_MODEL
 
 MODEL = DEFAULT_MODEL
 SERVER = 'http://127.0.0.1:11434'
+MIN_OLLAMA_VERSION = (0, 40, 9)
 
 
 def ollama_executable():
@@ -102,18 +103,18 @@ def setup_ollama():
     match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
     if not match:
         raise RuntimeError('Unable to determine the installed Ollama version')
-    if tuple(map(int, match.groups())) < (0, 40, 9):
+    if tuple(map(int, match.groups())) < MIN_OLLAMA_VERSION:
         install_ollama(upgrade=True)
         executable = ollama_executable()
         if not executable:
             raise RuntimeError('Ollama executable not found after update')
         version = subprocess.run([executable, '--version'], check=True, capture_output=True, text=True).stdout
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', version)
-        if not match or tuple(map(int, match.groups())) < (0, 40, 9):
+        if not match or tuple(map(int, match.groups())) < MIN_OLLAMA_VERSION:
             raise RuntimeError('Ollama update did not provide version 0.40.9 or newer')
     ensure_server(executable)
     running = re.search(r'(\d+)\.(\d+)\.(\d+)', server_version())
-    if not running or tuple(map(int, running.groups())) < (0, 40, 9):
+    if not running or tuple(map(int, running.groups())) < MIN_OLLAMA_VERSION:
         raise RuntimeError('Running Ollama server is too old; restart Ollama after updating')
     if not model_installed():
         subprocess.run([executable, 'pull', MODEL], check=True)

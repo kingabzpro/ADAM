@@ -10,6 +10,7 @@ from adam.coordinator import Coordinator
 from adam.d3 import D3Client
 from adam.evaluation import evaluate_saved_buys
 from adam.forecast import shared_forecaster
+from adam.health import health_message, ollama_health
 from adam.history import record_analysis, read_history
 from adam.news import news_evidence
 from adam.sentiment import shared_classifier
@@ -120,6 +121,14 @@ def dashboard(config) -> None:
     ui.label("ADAM").classes("text-h4")
     ui.label("Local market research and decision support")
     ui.label("Research signals are preliminary. No Trade is returned until risk limits and evidence are configured.")
+    health_status = ui.label('Checking local Ollama...')
+
+    async def check_health():
+        async with httpx.AsyncClient(timeout=3, trust_env=False) as client:
+            health_status.text = health_message(await ollama_health(client))
+
+    ui.timer(0.1, check_health, once=True)
+    ui.button('Check model readiness', on_click=check_health)
     snapshot_directory = Path.home() / '.adam' / 'snapshots'
     offline_toggle = ui.checkbox('Offline: use saved snapshots, always No Trade', value=False)
     tickers = ui.input("Tickers, separated by commas", value="AAPL, MSFT")

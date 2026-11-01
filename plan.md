@@ -605,6 +605,7 @@ adam/
 - [ ] Set up application configuration.
   - Built-in defaults and optional YAML configure ticker, data, and D3 concurrency; other configuration needs remain under review.
 - [ ] Create the startup supervisor.
+  - The dashboard reports local Ollama server and D3 model readiness; broader startup and hardware checks remain outstanding.
 - [x] Build NiceGUI dashboard shell.
 - [x] Implement Yahoo Finance market collection.
 - [x] Add multi-ticker requests.
@@ -667,9 +668,11 @@ adam/
 
 - [ ] Finalize one-command installation.
 - [ ] Document GPU and CPU requirements.
+  - Added platform and model capacity guidance with links to Ollama's current hardware requirements; additional hardware testing remains outstanding.
 - [ ] Add offline operation.
   - Added snapshot-based offline research with cached news, cached Timestral, and mandatory No Trade; validated on Windows with external socket connections blocked. Cross-platform live validation remains outstanding.
 - [ ] Publish installation and development guides.
+  - Added installation, configuration, and testing guides; full supported-platform installation validation remains outstanding.
 - [ ] Add optional Docker Compose packaging.
 
 ### Phase 8 — Release
