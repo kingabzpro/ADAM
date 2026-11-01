@@ -19,4 +19,3 @@ async def fetch_many(tickers: list[str], concurrency: int = 4):
             return await asyncio.to_thread(fetch_history, ticker)
 
     return await asyncio.gather(*(fetch(ticker) for ticker in tickers), return_exceptions=True)
-
