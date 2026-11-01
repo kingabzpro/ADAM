@@ -227,16 +227,6 @@
   .news-item a:hover { text-decoration: underline; }
   .news-meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
   .news-summary { color: #b9c1d0; font-size: 12.5px; margin-top: 4px; }
-  .risk-flags {
-    font-size: 12px; color: var(--warn-soft); line-height: 1.55;
-    background: rgba(245, 198, 107, 0.08); border: 1px solid rgba(245, 198, 107, 0.3);
-    border-radius: 9px; padding: 8px 12px; margin: 10px 0 0;
-  }
-  .risk-ok {
-    font-size: 12px; color: var(--ok); line-height: 1.55;
-    background: rgba(16, 201, 115, 0.08); border: 1px solid rgba(16, 201, 115, 0.3);
-    border-radius: 9px; padding: 8px 12px; margin: 10px 0 0;
-  }
   .error-box {
     font-size: 12px; color: var(--danger); background: rgba(244, 88, 107, 0.08);
     border: 1px solid rgba(244, 88, 107, 0.3); border-radius: 9px; padding: 8px 12px; margin: 10px 0 0;
@@ -291,16 +281,17 @@
           </linearGradient>
         </defs>
         <rect x="1.5" y="1.5" width="45" height="45" rx="13" fill="#0c1526" stroke="url(#logo-g)" stroke-width="2"/>
-        <line x1="13.5" y1="27" x2="13.5" y2="38" stroke="#2e8f63" stroke-width="2" stroke-linecap="round"/>
-        <rect x="10" y="30" width="7" height="6" rx="2" fill="#1d7a52"/>
-        <line x1="24" y1="21" x2="24" y2="36" stroke="#35b878" stroke-width="2" stroke-linecap="round"/>
-        <rect x="20.5" y="24" width="7" height="8" rx="2" fill="#25a869"/>
-        <line x1="34.5" y1="14" x2="34.5" y2="30" stroke="url(#logo-g)" stroke-width="2" stroke-linecap="round"/>
-        <rect x="31" y="17" width="7" height="10" rx="2" fill="url(#logo-g)"/>
-        <path d="M11 20 L20.5 13.5 L27 16 L37.5 8.5" fill="none" stroke="#eef1f8" stroke-width="1.7"
-              stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
-        <path d="M31.5 7.5 H38.5 V14.5" fill="none" stroke="#eef1f8" stroke-width="1.7"
-              stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+        <path d="M16.5 20.5 C16.5 14 19.5 10.5 24 10.5 C28.5 10.5 31.5 14 31.5 20.5"
+              fill="none" stroke="#eef1f8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M16.5 20.5 C16.5 27.5 18.5 33.5 24 38.5 C29.5 33.5 31.5 27.5 31.5 20.5
+                 C28.5 22.8 19.5 22.8 16.5 20.5 Z"
+              fill="url(#logo-g)" fill-opacity="0.28" stroke="url(#logo-g)" stroke-width="1.8" stroke-linejoin="round"/>
+        <path d="M18.6 17.2 Q21.2 15.4 23.2 16.6" fill="none" stroke="#eef1f8" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M29.4 17.2 Q26.8 15.4 24.8 16.6" fill="none" stroke="#eef1f8" stroke-width="1.6" stroke-linecap="round"/>
+        <path d="M19.4 19.4 Q20.7 20.6 22 19.4" fill="none" stroke="#eef1f8" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M26 19.4 Q27.3 20.6 28.6 19.4" fill="none" stroke="#eef1f8" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M24 20 V23.2" stroke="#eef1f8" stroke-width="1.4" stroke-linecap="round"/>
+        <path d="M20.8 25.4 Q24 27.2 27.2 25.4" fill="none" stroke="#eef1f8" stroke-width="1.4" stroke-linecap="round"/>
       </svg>
       <div>
         <h1>ADAM</h1>
@@ -328,7 +319,7 @@
         <button class="chip-btn" type="button" data-tickers="TSLA">TSLA</button>
         <button class="chip-btn" type="button" data-tickers="SPY">SPY</button>
       </div>
-      <p class="hint">Up to 20 tickers, analyzed concurrently. Risk limits use conservative built-in defaults.</p>
+      <p class="hint">Up to 20 tickers, analyzed concurrently. Five local agents vote; their consensus is the call.</p>
     </section>
 
     <section>
@@ -352,8 +343,8 @@
           <div class="how-card">
             <div class="how-num">3</div>
             <div>
-              <div class="how-title">Risk gate</div>
-              <div class="how-text">A deterministic risk engine checks the consensus before any result is shown.</div>
+              <div class="how-title">Vote</div>
+              <div class="how-text">The five votes combine into one consensus call; ties and disagreements stay visible.</div>
             </div>
           </div>
         </div>
@@ -373,7 +364,7 @@
     <section id="results-section" class="hidden">
       <div class="section-heading-row">
         <h2>Results</h2>
-        <span class="muted">Expand a ticker for evidence, forecast quantiles, and news.</span>
+        <span class="muted">The badge is the agents' consensus vote. Expand a ticker for evidence, quantiles, and news.</span>
       </div>
       <div id="results-list"></div>
     </section>
@@ -389,10 +380,9 @@
 
 <script>
   'use strict';
-  const STAGES = ['market_data', 'benchmark', 'market', 'forecast', 'news', 'technical', 'fundamentals', 'risk'];
-  const STAGE_LABELS = {market_data: 'Market data', benchmark: 'Benchmark (SPY)', market: 'Market agent',
-                        forecast: 'Forecast agent', news: 'News agent', technical: 'Technical agent',
-                        fundamentals: 'Fundamentals agent', risk: 'Risk gate'};
+  const STAGES = ['market', 'forecast', 'news', 'technical', 'fundamentals'];
+  const STAGE_LABELS = {market: 'Market agent', forecast: 'Forecast agent', news: 'News agent',
+                        technical: 'Technical agent', fundamentals: 'Fundamentals agent'};
   const $ = (id) => document.getElementById(id);
   const form = $('form'), input = $('tickers'), runButton = $('analyze-btn'),
         liveSection = $('live-section'), liveGrid = $('live-grid'), overallFill = $('overall-fill'),
@@ -515,10 +505,6 @@
     return signal === 'BUY' ? 'buy' : signal === 'SELL' ? 'sell' : 'hold';
   }
 
-  function actionClass(action) {
-    return action === 'BUY' ? 'buy' : action === 'SELL' ? 'sell' : action === 'HOLD' ? 'hold' : 'flat';
-  }
-
   function run() {
     const symbols = input.value.split(',').map((value) => value.trim().toUpperCase())
       .filter((value, index, all) => value && all.indexOf(value) === index).slice(0, 20);
@@ -549,14 +535,13 @@
       const item = JSON.parse(event.data);
       const stage = item.stage;
       if (stage === 'cache') {
-        STAGES.forEach((name) => {
-          if (name !== 'risk') setStage(item.ticker, name, 'flat', 'cached', 'flat');
-        });
-        finished += STAGES.length - 1;
+        STAGES.forEach((name) => setStage(item.ticker, name, 'flat', 'cached', 'flat'));
+        finished += STAGES.length;
         bumpProgress(total, finished);
         overallStatus.textContent = item.ticker + ' served from cache';
         return;
       }
+      if (!STAGES.includes(stage)) return;
       const state = item.status === 'started' ? 'running'
         : item.status === 'failed' ? 'failed'
         : item.status === 'skipped' ? 'skipped' : 'done';
@@ -566,12 +551,8 @@
         overallStatus.textContent = item.ticker + ' ' + (STAGE_LABELS[stage] || stage).toLowerCase() + ' ' +
           (item.status === 'completed' ? 'finished' : item.status === 'skipped' ? 'skipped (no market data)' : 'failed');
       }
-      if (stage === 'risk' && item.status !== 'started') {
-        setStage(item.ticker, 'risk', 'done', item.status, actionClass(item.status));
-      } else if (STAGES.includes(stage)) {
-        const label = state === 'running' ? 'running' : state === 'skipped' ? 'skipped' : item.status;
-        setStage(item.ticker, stage, state, label, null, item.error);
-      }
+      const label = state === 'running' ? 'running' : state === 'skipped' ? 'skipped' : item.status;
+      setStage(item.ticker, stage, state, label, null, item.error);
     });
 
     source.addEventListener('result', (event) => {
@@ -581,7 +562,6 @@
         else setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
                       verdictClass(signal.signal));
       });
-      setStage(payload.ticker, 'risk', 'done', payload.action, actionClass(payload.action));
       resultsSection.classList.remove('hidden');
       resultsList.appendChild(resultCard(payload));
     });
@@ -595,13 +575,6 @@
     };
   }
 
-  function decisionBadge(signal) {
-    const badge = document.createElement('span');
-    badge.className = 'decision ' + (signal ? verdictClass(signal) : 'flat');
-    badge.textContent = signal || 'NO CONSENSUS';
-    return badge;
-  }
-
   function resultCard(payload) {
     const card = document.createElement('div');
     card.className = 'result-card';
@@ -613,12 +586,11 @@
     tk.className = 'tk';
     tk.textContent = payload.ticker;
     summary.appendChild(tk);
-    summary.appendChild(decisionBadge(payload.vote.signal));
-    const actionBadge = document.createElement('span');
-    actionBadge.className = 'decision ' + actionClass(payload.action);
-    actionBadge.textContent = payload.action;
-    actionBadge.title = 'Risk-gated result';
-    summary.appendChild(actionBadge);
+    const finalBadge = document.createElement('span');
+    finalBadge.className = 'decision ' + (payload.vote.signal ? verdictClass(payload.vote.signal) : 'flat');
+    finalBadge.textContent = payload.vote.signal || 'NO CONSENSUS';
+    finalBadge.title = "The agents' consensus vote";
+    summary.appendChild(finalBadge);
     const counts = payload.vote.counts;
     const voteLine = document.createElement('span');
     voteLine.className = 'vote-line';
@@ -675,30 +647,8 @@
       errors.textContent = 'Errors: ' + payload.errors;
       detail.appendChild(errors);
     }
-    detail.appendChild(riskLine(payload.risk));
     card.appendChild(detail);
     return card;
-  }
-
-  function riskLine(risk) {
-    const separator = risk.indexOf(': ');
-    const status = separator === -1 ? risk : risk.slice(0, separator);
-    const reasons = separator === -1 ? '' : risk.slice(separator + 2);
-    const labels = {pass: 'Risk gate passed', warning: 'Risk gate warning',
-                    fail: 'Risk gate blocked the trade', insufficient_evidence: 'Not enough evidence to trade'};
-    const box = document.createElement('div');
-    const suffix = reasons ? ': ' + reasons : '';
-    if (status === 'pass') {
-      box.className = 'risk-ok';
-      box.textContent = labels.pass + suffix;
-    } else if (status === 'warning') {
-      box.className = 'risk-flags';
-      box.textContent = labels.warning + suffix;
-    } else {
-      box.className = 'error-box';
-      box.textContent = (labels[status] || 'Risk gate: ' + status) + suffix;
-    }
-    return box;
   }
 
   function newsItem(item) {

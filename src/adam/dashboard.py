@@ -145,7 +145,7 @@ def result_payload(row: dict) -> dict:
     quantiles = {name: forecast.get(name) for name in
                  ('horizons', 'lower_returns', 'median_returns', 'upper_returns')}
     return {'ticker': row['ticker'], 'agents': row['agents'], 'signals': row['signals'], 'vote': row['vote'],
-            'vote_display': row['vote_display'], 'action': row['action'], 'risk': row['risk'], 'errors': row['errors'],
+            'vote_display': row['vote_display'], 'errors': row['errors'],
             'summary': evidence_summary(row['evidence']), 'forecast': quantiles, 'news_links': links}
 
 

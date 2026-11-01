@@ -4,7 +4,7 @@
 
 [![Tests](https://github.com/kingabzpro/ADAM/actions/workflows/tests.yml/badge.svg)](https://github.com/kingabzpro/ADAM/actions/workflows/tests.yml) [![Python 3.12](https://img.shields.io/badge/python-3.12-blue?logo=python&logoColor=white)](https://www.python.org/) [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-555)](#get-started) [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
-ADAM combines market data, local forecasting, financial sentiment, and D3 decision models in a single research dashboard. A deterministic risk gate checks the consensus before presenting a result.
+ADAM combines market data, local forecasting, financial sentiment, and D3 decision models in a single research dashboard. Five specialist agents vote, and their consensus is the call you see. A deterministic risk engine still evaluates and records every analysis.
 
 > **Work in progress:** News coverage, automated risk evidence, and historical evaluation are still being developed. ADAM is a research tool, not a brokerage or a promise of returns.
 
