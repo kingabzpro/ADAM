@@ -12,6 +12,7 @@ dependencies = [
     "nicegui>=3.18.0",
     "pydantic>=2.14.2",
     "pyyaml>=6.0.3",
+    "trafilatura>=2.3.1",
     "yfinance>=1.7.0",
 ]
 

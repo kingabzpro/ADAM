@@ -53,3 +53,41 @@ async def discover_news(ticker: str, client) -> list[dict]:
             if len(content) > MAX_FEED_BYTES:
                 raise ValueError("News feed is too large")
     return parse_feed(bytes(content))
+
+
+def extract_article(html: str) -> str | None:
+    from trafilatura import extract
+
+    if not html or not html.strip():
+        return None
+    return extract(html, include_comments=False, include_tables=False)
+
+
+def analyze_articles(records: list[dict], classifier) -> dict:
+    from adam.sentiment import sentiment_evidence
+
+    articles = []
+    unique_texts = []
+    seen = set()
+    for record in records:
+        article = dict(record)
+        text = record.get("text")
+        if not isinstance(text, str) or not text.strip():
+            article["status"] = "unavailable"
+        else:
+            key = " ".join(text.casefold().split())
+            if key in seen:
+                article["status"] = "duplicate"
+            else:
+                seen.add(key)
+                article["status"] = "scored"
+                unique_texts.append(text)
+        articles.append(article)
+    if not unique_texts:
+        return {"articles": articles, "scored_count": 0, "mean_scores": None}
+    evidence = sentiment_evidence(unique_texts, classifier)
+    sentiments = iter(evidence["articles"])
+    for article in articles:
+        if article["status"] == "scored":
+            article["sentiment"] = next(sentiments)
+    return {"articles": articles, "scored_count": len(unique_texts), "mean_scores": evidence["mean_scores"]}
