@@ -1,7 +1,58 @@
 import numpy as np
 import pandas as pd
+from datetime import datetime, timezone
+from math import isfinite
 
 from adam.forecast import forecast_evidence
+
+
+def evaluate_saved_buys(records, prices, *, ticker, horizon=5, cost_bps=0.0, now=None):
+    """Measure independent saved Buy outcomes, not a portfolio or executed trades."""
+    now = now or datetime.now(timezone.utc)
+    if (not isinstance(ticker, str) or not ticker.strip() or type(horizon) is not int or horizon < 1
+            or isinstance(cost_bps, bool) or not isinstance(cost_bps, (int, float))
+            or not isfinite(cost_bps) or not 0 <= cost_bps < 10000
+            or now.tzinfo is None or now.utcoffset() is None
+            or not isinstance(prices.index, pd.DatetimeIndex) or prices.index.tz is None
+            or not prices.index.is_monotonic_increasing or prices.index.has_duplicates
+            or pd.Index(prices.index.date).has_duplicates or prices.empty
+            or not {'Open', 'Close'}.issubset(prices.columns)):
+        raise ValueError('Invalid evaluation inputs')
+    try:
+        data = prices[['Open', 'Close']].apply(pd.to_numeric, errors='raise').astype(float)
+    except (TypeError, ValueError) as error:
+        raise ValueError('Prices must be numeric') from error
+    if not np.isfinite(data.to_numpy()).all() or (data <= 0).to_numpy().any():
+        raise ValueError('Prices must be positive and finite')
+    completed = data[data.index.date < now.astimezone(data.index.tz).date()]
+    outcomes = []
+    for record in records:
+        if record['ticker'].upper() != ticker.strip().upper():
+            raise ValueError('Records must match the requested ticker')
+        if record['risk']['action'] != 'BUY' or record['risk']['status'] not in ('pass', 'warning'):
+            continue
+        created = datetime.fromisoformat(record['created_at'])
+        if created.tzinfo is None or created.utcoffset() is None:
+            raise ValueError('Record time must be timezone-aware')
+        date = created.astimezone(data.index.tz).date()
+        row = {'id': record['id'], 'created_at': record['created_at'], 'status': 'pending'}
+        if date < data.index[0].date():
+            row['status'] = 'history_unavailable'
+        else:
+            later = completed[completed.index.date > date]
+            if len(later) >= horizon:
+                entry, exit = later.iloc[0], later.iloc[horizon - 1]
+                rate = cost_bps / 10000
+                row.update(status='completed', entry_date=later.index[0].date().isoformat(),
+                           exit_date=later.index[horizon - 1].date().isoformat(),
+                           entry_price=float(entry['Open']), exit_price=float(exit['Close']),
+                           **{'return': float(exit['Close'] / entry['Open'] * (1 - rate) / (1 + rate) - 1)})
+        outcomes.append(row)
+    returns = [row['return'] for row in outcomes if row['status'] == 'completed']
+    return {'ticker': ticker.strip().upper(), 'horizon_sessions': horizon, 'cost_bps': cost_bps,
+            'outcomes': outcomes, 'completed_count': len(returns),
+            'mean_return': sum(returns) / len(returns) if returns else None,
+            'win_rate': sum(value > 0 for value in returns) / len(returns) if returns else None}
 
 
 def compare_rule_baseline(prices, decisions, evidence, limits, *, window=20, initial_cash=10000.0, cost_bps=0.0):

@@ -8,17 +8,24 @@ from nicegui import ui
 
 from adam.coordinator import Coordinator
 from adam.d3 import D3Client
+from adam.evaluation import evaluate_saved_buys
 from adam.forecast import shared_forecaster
 from adam.history import record_analysis, read_history
 from adam.news import headline_evidence
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
 
-from adam.market import fetch_many
+from adam.market import fetch_history, fetch_many
 
 
 def parse_tickers(value: str) -> list[str]:
     return list(dict.fromkeys(ticker.strip().upper() for ticker in value.split(",") if ticker.strip()))
+
+
+async def saved_buy_report(ticker, history_path):
+    records = await asyncio.to_thread(read_history, history_path, ticker=ticker, limit=1000)
+    prices = await asyncio.to_thread(fetch_history, ticker, '1y')
+    return evaluate_saved_buys(records, prices, ticker=ticker)
 
 
 def market_rows(tickers, results):
@@ -214,6 +221,27 @@ def dashboard(config) -> None:
             history_status.text = f'Unable to read history: {error}'
 
     ui.button('Load history', on_click=show_history)
+    ui.label('Hypothetical Buy outcomes: next session open to fifth completed session close, before costs. Overlapping outcomes are not portfolio returns.')
+    outcomes_status = ui.label()
+    outcomes = ui.code('', language='json').classes('w-full')
+
+    async def show_outcomes():
+        symbols = parse_tickers(tickers.value or '')
+        if len(symbols) != 1:
+            outcomes_status.text = 'Enter exactly one ticker to evaluate saved Buy decisions.'
+            return
+        outcomes_button.disable()
+        outcomes_status.text = 'Loading saved decisions and prices...'
+        try:
+            report = await saved_buy_report(symbols[0], history_path)
+            outcomes.content = json.dumps(report, indent=2, ensure_ascii=False)
+            outcomes_status.text = f"{report['completed_count']} completed outcomes from up to 1,000 saved analyses."
+        except Exception as error:
+            outcomes_status.text = f'Unable to evaluate saved decisions: {error}'
+        finally:
+            outcomes_button.enable()
+
+    outcomes_button = ui.button('Evaluate saved Buy decisions', on_click=show_outcomes)
 
 
 def run_dashboard(config) -> None:

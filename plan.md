@@ -656,6 +656,7 @@ adam/
   - Implemented comparison for caller-supplied point-in-time decisions and preselected weights; historical dataset and out-of-sample study remain outstanding.
 - [ ] Test risk-adjusted performance.
 - [ ] Add decision history and performance tracking.
+  - Saved analyses can be evaluated as independent hypothetical Buy outcomes over subsequent completed sessions; portfolio-level tracking remains outstanding.
 - [ ] Implement forward and paper-trading evaluation.
 
 ### Phase 7 — Distribution

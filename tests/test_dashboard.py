@@ -17,6 +17,18 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(rows[2]["status"], "No price history")
 
 class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
+    async def test_history_outcomes_use_ticker_history(self):
+        from unittest.mock import patch, sentinel
+        from adam.dashboard import saved_buy_report
+        with patch('adam.dashboard.read_history', return_value=[sentinel.record]) as read, \
+             patch('adam.dashboard.fetch_history', return_value=sentinel.prices) as fetch, \
+             patch('adam.dashboard.evaluate_saved_buys', return_value=sentinel.report) as evaluate:
+            result = await saved_buy_report('AAPL', 'history.sqlite')
+        self.assertIs(result, sentinel.report)
+        read.assert_called_once_with('history.sqlite', ticker='AAPL', limit=1000)
+        fetch.assert_called_once_with('AAPL', '1y')
+        evaluate.assert_called_once_with([sentinel.record], sentinel.prices, ticker='AAPL')
+
     async def test_analysis_rows_show_votes_and_risk(self):
         from unittest.mock import AsyncMock, patch
         from types import SimpleNamespace
