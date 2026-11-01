@@ -661,7 +661,8 @@ adam/
 
 ### Phase 6 — Evaluation
 
-- [ ] Implement historical backtesting.
+- [x] Implement historical backtesting.
+  - `adam-backtest` runs the four-agent consensus on point-in-time three-month windows at weekly decision dates, executes long/flat at the next session's open, and reports buy-and-hold and SMA-20 baselines with directional accuracy (src/adam/study.py). First study: top 25 S&P mega caps, January to June 2026 (docs/backtest-2026H1.md): equal-weight strategy +2.0% versus buy-and-hold +13.6%; BUY accuracy 64% (50 weeks), SELL accuracy 42% (66 weeks), 81% of weeks HOLD. Point-in-time fundamentals and news replay remain outstanding.
 - [ ] Compare rule-based and AI-based decisions.
   - Added a trailing moving-average baseline against risk-gated model consensus; an out-of-sample study with recorded historical AI decisions remains outstanding.
 - [ ] Evaluate weighted versus majority voting.
