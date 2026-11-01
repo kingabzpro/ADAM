@@ -646,7 +646,7 @@ adam/
 
 - [ ] Add dynamic inference batching.
 - [ ] Implement bounded worker pools.
-  - Yahoo price and fundamentals calls share a bounded pool and retry selected transient connection failures once; broader workload controls remain outstanding.
+  - Yahoo price and fundamentals calls share a bounded pool, are spaced by a configurable minimum interval, and retry selected transient connection failures once; broader workload controls remain outstanding.
 - [ ] Optimize CPU thread consumption.
 - [ ] Reduce duplicate model loading.
 - [ ] Add request deduplication.

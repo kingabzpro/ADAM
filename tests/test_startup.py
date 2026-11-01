@@ -9,6 +9,9 @@ class StartupTests(unittest.TestCase):
         self.ollama_patch = patch('adam.supervisor.ollama_executable', return_value=None)
         self.ollama_patch.start()
         self.addCleanup(self.ollama_patch.stop)
+        self.pacer_patch = patch('adam.supervisor.configure_yahoo')
+        self.pacer = self.pacer_patch.start()
+        self.addCleanup(self.pacer_patch.stop)
 
     def test_starts_without_a_config_file(self):
         import os
@@ -23,6 +26,7 @@ class StartupTests(unittest.TestCase):
             finally:
                 os.chdir(old_directory)
         run_dashboard.assert_called_once_with(Config(inference_concurrency=1, data_concurrency=4, ticker_concurrency=4))
+        self.pacer.assert_called_once_with(.25)
 
     def test_explicit_missing_config_is_an_error(self):
         import os

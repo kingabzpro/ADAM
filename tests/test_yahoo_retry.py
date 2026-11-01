@@ -10,6 +10,31 @@ from adam.fundamentals import fetch_fundamentals
 
 
 class YahooRetryTests(unittest.TestCase):
+    def setUp(self):
+        self.pacer_patch = patch('adam.yahoo._pacer.wait')
+        self.wait_mock = self.pacer_patch.start()
+        self.addCleanup(self.pacer_patch.stop)
+
+    def test_pacer_spaces_requests_and_allows_configuration(self):
+        from adam.yahoo import YahooPacer
+        pacer = YahooPacer(.25)
+        with patch('adam.yahoo.time.monotonic', side_effect=[10., 10., 10.05, 10.25]), \
+             patch('adam.yahoo.time.sleep') as sleep:
+            pacer.wait()
+            pacer.wait()
+        sleep.assert_called_once()
+        self.assertAlmostEqual(sleep.call_args.args[0], .2)
+        for invalid in (-1, float('nan'), True, 61):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                pacer.configure(invalid)
+
+    @patch('adam.yahoo.time.sleep')
+    @patch('adam.market.yf.Ticker')
+    def test_each_retry_is_paced(self, ticker, sleep):
+        ticker.return_value.history.side_effect = [Timeout('timeout', code=CurlECode.OPERATION_TIMEDOUT), sentinel.prices]
+        self.assertIs(fetch_history('AAPL'), sentinel.prices)
+        self.assertEqual(self.wait_mock.call_count, 2)
+
     @patch('adam.yahoo.time.sleep')
     @patch('adam.market.yf.Ticker')
     def test_history_retries_one_transient_timeout(self, ticker, sleep):

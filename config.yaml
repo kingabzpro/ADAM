@@ -1,3 +1,4 @@
 inference_concurrency: 1
 data_concurrency: 4
 ticker_concurrency: 4
+yahoo_interval_seconds: 0.25

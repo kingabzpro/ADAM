@@ -16,10 +16,16 @@ class ConfigTests(unittest.TestCase):
     def test_rejects_unknown_and_invalid_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'config.yaml'
-            for content in ('other: 1', 'data_concurrency: 0', 'ticker_concurrency: true'):
+            for content in ('other: 1', 'data_concurrency: 0', 'ticker_concurrency: true', 'yahoo_interval_seconds: -1', 'yahoo_interval_seconds: .nan', 'yahoo_interval_seconds: true'):
                 path.write_text(content, encoding='utf-8')
                 with self.subTest(content=content), self.assertRaises(ValueError):
                     load_config(path)
+
+    def test_yahoo_interval_accepts_fractional_seconds(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'config.yaml'
+            path.write_text('yahoo_interval_seconds: 0.5\n', encoding='utf-8')
+            self.assertEqual(load_config(path).yahoo_interval_seconds, .5)
 
     def test_loads_inference_concurrency(self):
         with tempfile.TemporaryDirectory() as directory:
