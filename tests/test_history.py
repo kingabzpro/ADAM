@@ -45,3 +45,12 @@ class HistoryTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 record_analysis(path, result, risk_evidence=RiskEvidence(), limits=None)
             self.assertFalse(path.exists())
+
+    async def test_creates_missing_history_directory(self):
+        from types import SimpleNamespace
+        from adam.risk import RiskResult
+        result = SimpleNamespace(ticker='AAPL', agents={}, decisions={}, errors={}, timeline=[], risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('missing',)))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'nested' / 'history.sqlite'
+            record_analysis(path, result, risk_evidence=RiskEvidence(), limits=None)
+            self.assertEqual(read_history(path)[0]['ticker'], 'AAPL')

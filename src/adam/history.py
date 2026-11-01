@@ -19,6 +19,7 @@ def record_analysis(path, result, *, risk_evidence, limits):
     }
     encoded = json.dumps(payload, allow_nan=False, ensure_ascii=False)
     created_at = datetime.now(timezone.utc).isoformat()
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
     with closing(sqlite3.connect(path)) as database, database:
         database.execute('CREATE TABLE IF NOT EXISTS analysis_history (id INTEGER PRIMARY KEY, ticker TEXT NOT NULL, created_at TEXT NOT NULL, payload TEXT NOT NULL)')
         cursor = database.execute('INSERT INTO analysis_history (ticker, created_at, payload) VALUES (?, ?, ?)',
