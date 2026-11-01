@@ -1,4 +1,9 @@
 from math import isclose, isfinite
+import threading
+
+_classifier_lock = threading.Lock()
+_inference_lock = threading.Lock()
+_classifier = None
 
 
 def load_classifier(model: str = "ProsusAI/finbert", *, device: str = "cpu", local_files_only: bool = False):
@@ -9,10 +14,19 @@ def load_classifier(model: str = "ProsusAI/finbert", *, device: str = "cpu", loc
     return pipeline("text-classification", model=weights, tokenizer=tokenizer, device=device)
 
 
+def shared_classifier():
+    global _classifier
+    with _classifier_lock:
+        if _classifier is None:
+            _classifier = load_classifier()
+        return _classifier
+
+
 def sentiment_evidence(texts: list[str], classifier) -> dict:
     if not texts or any(not isinstance(text, str) or not text.strip() for text in texts):
         raise ValueError("At least one nonempty article is required")
-    outputs = classifier(texts, top_k=None, truncation=True)
+    with _inference_lock:
+        outputs = classifier(texts, top_k=None, truncation=True)
     if len(outputs) != len(texts):
         raise ValueError("FinBERT returned the wrong number of results")
     labels = {"positive", "negative", "neutral"}

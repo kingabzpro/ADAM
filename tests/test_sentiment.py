@@ -24,3 +24,11 @@ class SentimentTests(unittest.TestCase):
         classifier.return_value = [[{"label": "positive", "score": 1.0}]]
         with self.assertRaises(ValueError):
             sentiment_evidence(["headline"], classifier)
+
+    def test_shared_classifier_loads_once(self):
+        from unittest.mock import patch, sentinel
+        from adam.sentiment import shared_classifier
+        with patch('adam.sentiment._classifier', None), patch('adam.sentiment.load_classifier', return_value=sentinel.classifier) as load:
+            self.assertIs(shared_classifier(), sentinel.classifier)
+            self.assertIs(shared_classifier(), sentinel.classifier)
+            load.assert_called_once()
