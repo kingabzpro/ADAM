@@ -667,7 +667,7 @@ adam/
 - [ ] Add decision history and performance tracking.
   - Saved analyses can be evaluated as independent hypothetical Buy outcomes over subsequent completed sessions; portfolio-level tracking remains outstanding.
 - [ ] Implement forward and paper-trading evaluation.
-  - Added a local single-ticker paper ledger using saved risk-gated analyses and manually supplied hypothetical prices. Automated forward pricing, multi-asset portfolios, and broader evaluation remain outstanding.
+  - Added a local single-ticker paper ledger and dashboard controls using saved risk-gated analyses and manually supplied hypothetical prices. Automated forward pricing, multi-asset portfolios, and broader evaluation remain outstanding.
 
 ### Phase 7 — Distribution
 

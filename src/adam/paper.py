@@ -48,11 +48,12 @@ def create_account(path, ticker, *, initial_cash=10000.0, cost_bps=0.0):
             raise ValueError('Paper account already exists for this ticker') from error
 
 
-def execute_paper(path, analysis_id, *, price, now=None):
+def execute_paper(path, analysis_id, *, price, now=None, expected_ticker=None):
     """Apply one saved, revalidated analysis at a manually supplied hypothetical price."""
     price = _positive(price, 'Price')
     if type(analysis_id) is not int or analysis_id < 1:
         raise ValueError('Invalid analysis ID')
+    expected = _symbol(expected_ticker) if expected_ticker is not None else None
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError('Time must be timezone-aware')
@@ -70,6 +71,8 @@ def execute_paper(path, analysis_id, *, price, now=None):
             payload = json.loads(raw)
             if payload.get('ticker') != ticker or _symbol(ticker) != ticker:
                 raise ValueError('Invalid analysis ticker')
+            if expected is not None and ticker != expected:
+                raise ValueError('Saved analysis ticker does not match the selected account')
             if not _has_table(database, 'paper_accounts') or not _has_table(database, 'paper_trades'):
                 raise ValueError('Create a paper account for this ticker first')
             account = database.execute('SELECT cash, shares, cost_basis, cost_bps FROM paper_accounts WHERE ticker = ?', (ticker,)).fetchone()

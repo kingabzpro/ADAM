@@ -2,7 +2,9 @@
 
 ADAM can maintain a single-ticker simulated cash account for research. It does not connect to a broker or place orders. Paper balances and fills are stored alongside analysis history in `~/.adam/history.sqlite`.
 
-Create an account once per ticker, with starting cash and an optional per-side transaction cost in basis points:
+In the dashboard, open **Paper trading — simulation only**, choose a ticker, starting cash, and a per-side fee, then create an account. Load **Saved analysis history** to find the analysis ID. Enter that ID and a hypothetical price, then select **Record simulated trade**. The selected paper ticker must match the saved analysis; offline mode does not record simulated trades. Use **Load paper account** to view balances and recent simulated fills.
+
+The command line is also available. Create an account once per ticker, with starting cash and an optional per-side transaction cost in basis points:
 
 ```bash
 uv run adam-paper init AAPL --cash 10000 --cost-bps 10

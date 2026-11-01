@@ -84,6 +84,13 @@ class PaperTests(unittest.TestCase):
             execute_paper(self.path, analysis_id, price=100)
         self.assertEqual(paper_status(self.path, 'AAPL')['trade_count'], 0)
 
+    def test_expected_ticker_mismatch_never_records_a_trade(self):
+        analysis_id = self.record()
+        with self.assertRaisesRegex(ValueError, 'ticker'):
+            execute_paper(self.path, analysis_id, price=100, expected_ticker='MSFT')
+        self.assertEqual(paper_status(self.path, 'AAPL')['trade_count'], 0)
+        self.assertEqual(execute_paper(self.path, analysis_id, price=100, expected_ticker='aapl')['side'], 'BUY')
+
     def test_missing_forecast_evidence_cannot_be_replaced_by_user_downside(self):
         import json
         import sqlite3

@@ -13,6 +13,7 @@ from adam.forecast import shared_forecaster
 from adam.health import health_message, ollama_health
 from adam.history import record_analysis, read_history
 from adam.news import news_evidence
+from adam.paper import create_account, execute_paper, paper_status, paper_trades
 from adam.presentation import evidence_summary, forecast_chart, safe_news_link, vote_summary
 from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
@@ -245,6 +246,7 @@ def dashboard(config) -> None:
     ui.label('Saved analysis history').classes('text-h6')
     history_status = ui.label()
     history_table = ui.table(columns=[
+        {'name': 'id', 'label': 'Analysis ID', 'field': 'id'},
         {'name': 'time', 'label': 'Saved at (UTC)', 'field': 'time'},
         {'name': 'ticker', 'label': 'Ticker', 'field': 'ticker'},
         {'name': 'action', 'label': 'Risk-gated result', 'field': 'action'},
@@ -278,6 +280,62 @@ def dashboard(config) -> None:
             history_status.text = f'Unable to read history: {error}'
 
     ui.button('Load history', on_click=show_history)
+    with ui.expansion('Paper trading — simulation only').classes('w-full'):
+        ui.label('Local simulation only. No brokerage order is placed; prices are manually entered and unverified.')
+        with ui.row():
+            paper_ticker = ui.input('Paper account ticker', value='AAPL')
+            paper_cash = ui.number('Starting paper cash', value=10000, min=0.01)
+            paper_cost = ui.number('Fee per side (basis points)', value=0, min=0, max=9999)
+        with ui.row():
+            paper_analysis = ui.number('Saved analysis ID', min=1, precision=0)
+            paper_price = ui.number('Hypothetical price', min=0.000001)
+        paper_message = ui.label()
+        paper_output = ui.code('', language='json').classes('w-full')
+
+        async def refresh_paper():
+            ticker = (paper_ticker.value or '').strip().upper()
+            try:
+                status = await asyncio.to_thread(paper_status, history_path, ticker, price=paper_price.value)
+                trades = await asyncio.to_thread(paper_trades, history_path, ticker)
+                paper_output.content = json.dumps({'account': status, 'trades': trades}, indent=2, ensure_ascii=False)
+                paper_message.text = 'Paper account loaded. Prices are hypothetical.'
+            except Exception as error:
+                paper_output.content = ''
+                paper_message.text = f'Unable to load paper account: {error}'
+
+        async def make_paper_account():
+            paper_create.disable()
+            try:
+                await asyncio.to_thread(create_account, history_path, paper_ticker.value or '',
+                                        initial_cash=paper_cash.value, cost_bps=paper_cost.value)
+                await refresh_paper()
+            except Exception as error:
+                paper_message.text = f'Unable to create paper account: {error}'
+            finally:
+                paper_create.enable()
+
+        async def make_paper_trade():
+            if offline_toggle.value:
+                paper_message.text = 'Offline research cannot create a paper trade.'
+                return
+            paper_trade.disable()
+            try:
+                identifier = paper_analysis.value
+                if type(identifier) is not int and (type(identifier) is not float or not identifier.is_integer()):
+                    raise ValueError('Enter a whole-number saved analysis ID')
+                result = await asyncio.to_thread(execute_paper, history_path, int(identifier), price=paper_price.value,
+                                                 expected_ticker=paper_ticker.value or '')
+                await refresh_paper()
+                paper_message.text = f"Simulated {result['side']} recorded. " + paper_message.text
+            except Exception as error:
+                paper_message.text = f'Paper trade rejected: {error}'
+            finally:
+                paper_trade.enable()
+
+        with ui.row():
+            paper_create = ui.button('Create paper account', on_click=make_paper_account)
+            ui.button('Load paper account', on_click=refresh_paper)
+            paper_trade = ui.button('Record simulated trade', on_click=make_paper_trade)
     ui.label('Hypothetical Buy outcomes: next session open to fifth completed session close, before costs. Overlapping outcomes are not portfolio returns.')
     outcomes_status = ui.label()
     outcomes = ui.code('', language='json').classes('w-full')
