@@ -9,6 +9,11 @@ from test_technical import history
 
 
 class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.patch_fundamentals = patch('adam.coordinator.fetch_fundamentals', side_effect=RuntimeError('unavailable'))
+        self.patch_fundamentals.start()
+        self.addCleanup(self.patch_fundamentals.stop)
+
     async def test_runs_available_agents_and_applies_risk_gate(self):
         model = AsyncMock()
         async def assess(ticker, agent, evidence):
@@ -44,4 +49,22 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.agents['market'], 'failed')
         self.assertEqual(result.errors['market_data'], 'offline')
         self.assertEqual(result.risk.action, 'NO_TRADE')
+        model.assess.assert_not_awaited()
+
+    async def test_fundamentals_runs_when_price_collection_fails(self):
+        from datetime import datetime, timezone
+        model = AsyncMock()
+        model.assess.return_value = decision('fundamentals')
+        info = {'revenueGrowth': 0.1, 'mostRecentQuarter': int(datetime.now(timezone.utc).timestamp())}
+        with patch('adam.coordinator.fetch_fundamentals', return_value=info), patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['fundamentals'], 'completed')
+        self.assertEqual(result.agents['market'], 'failed')
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+
+    async def test_stale_fundamentals_are_not_sent_to_model(self):
+        model = AsyncMock()
+        with patch('adam.coordinator.fetch_fundamentals', return_value={'revenueGrowth': 0.1, 'mostRecentQuarter': 1}), patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, LIMITS).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['fundamentals'], 'failed')
         model.assess.assert_not_awaited()

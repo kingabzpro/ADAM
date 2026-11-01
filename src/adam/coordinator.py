@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from adam.decisions import Decision, consensus
 from adam.forecast import forecast_evidence
+from adam.fundamentals import fetch_fundamentals, fundamentals_evidence
 from adam.market import fetch_history, market_evidence
 from adam.risk import RiskEvidence, RiskLimits, RiskResult, evaluate_risk
 from adam.technical import technical_evidence
@@ -34,14 +35,6 @@ class Coordinator:
         agents = {name: "unavailable" for name in ("market", "technical", "forecast", "news", "fundamentals")}
         decisions = {}
         errors = {}
-        try:
-            history = await asyncio.to_thread(fetch_history, ticker, "3mo")
-        except Exception as error:
-            errors["market_data"] = str(error)
-            agents["market"] = agents["technical"] = "failed"
-            if self.forecaster is not None:
-                agents["forecast"] = "failed"
-            return AnalysisResult(ticker, agents, decisions, evaluate_risk(consensus([]), risk_evidence, self.limits), errors)
 
         async def run(name, compute):
             try:
@@ -56,19 +49,38 @@ class Coordinator:
                 agents[name] = "failed"
                 errors[name] = str(error)
 
-        async def market():
-            return await asyncio.to_thread(market_evidence, history)
+        async def fundamentals():
+            info = await asyncio.to_thread(fetch_fundamentals, ticker)
+            evidence = fundamentals_evidence(info)
+            if not evidence["metrics"] or evidence["freshness"] != "current":
+                raise ValueError("Fundamentals missing or fiscal quarter date stale or unknown")
+            return evidence
 
-        async def technical():
-            return await asyncio.to_thread(technical_evidence, history)
+        async def market_stream():
+            try:
+                history = await asyncio.to_thread(fetch_history, ticker, "3mo")
+            except Exception as error:
+                errors["market_data"] = str(error)
+                agents["market"] = agents["technical"] = "failed"
+                if self.forecaster is not None:
+                    agents["forecast"] = "failed"
+                return
 
-        async def forecast():
-            async with self.forecast_slot:
-                return await asyncio.to_thread(forecast_evidence, history["Close"].to_numpy(), horizon, self.forecaster)
+            async def market():
+                return await asyncio.to_thread(market_evidence, history)
 
-        tasks = [run("market", market), run("technical", technical)]
-        if self.forecaster is not None:
-            tasks.append(run("forecast", forecast))
-        await asyncio.gather(*tasks)
+            async def technical():
+                return await asyncio.to_thread(technical_evidence, history)
+
+            async def forecast():
+                async with self.forecast_slot:
+                    return await asyncio.to_thread(forecast_evidence, history["Close"].to_numpy(), horizon, self.forecaster)
+
+            tasks = [run("market", market), run("technical", technical)]
+            if self.forecaster is not None:
+                tasks.append(run("forecast", forecast))
+            await asyncio.gather(*tasks)
+
+        await asyncio.gather(market_stream(), run("fundamentals", fundamentals))
         result = evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
         return AnalysisResult(ticker, agents, decisions, result, errors)
