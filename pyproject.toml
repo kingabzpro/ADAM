@@ -21,6 +21,10 @@ adam = "adam:main"
 forecast = [
     "timestral",
 ]
+sentiment = [
+    "torch>=2.15.0",
+    "transformers>=5.22.1",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
