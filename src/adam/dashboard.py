@@ -1,5 +1,7 @@
 import asyncio
 import json
+import importlib.util
+from pathlib import Path
 
 import httpx
 from nicegui import ui
@@ -7,6 +9,9 @@ from nicegui import ui
 from adam.coordinator import Coordinator
 from adam.d3 import D3Client
 from adam.forecast import shared_forecaster
+from adam.history import record_analysis, read_history
+from adam.news import headline_evidence
+from adam.sentiment import shared_classifier
 from adam.risk import RiskEvidence, RiskLimits
 
 from adam.market import fetch_many
@@ -52,22 +57,45 @@ def parse_risk_input(text: str):
         raise ValueError("Invalid risk configuration") from error
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False) -> list[dict]:
-    async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
+def format_agent(name, status, decision):
+    if decision is None:
+        return f"{name}: {status}"
+    scores = ', '.join(f"{signal} {decision.probabilities[signal]:.1%}" for signal in ('BUY', 'HOLD', 'SELL'))
+    label = " [abstained]" if not decision.reliable or decision.stale or decision.status != "completed" else ""
+    return f"{name}: {decision.signal} ({scores}){label}"
+
+
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False, news=False, on_event=None, history_path=None) -> list[dict]:
+    async with httpx.AsyncClient(timeout=180, trust_env=False) as http:
         forecaster = await asyncio.to_thread(shared_forecaster) if forecast else None
-        coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster, inference_concurrency=inference_concurrency)
+        classifier = await asyncio.to_thread(shared_classifier) if news else None
+
+        async def news_provider(ticker):
+            async with httpx.AsyncClient(timeout=30) as news_http:
+                return await headline_evidence(ticker, news_http, classifier)
+
+        coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster,
+                                  news_provider=news_provider if news else None,
+                                  inference_concurrency=inference_concurrency)
         ticker_slots = asyncio.Semaphore(4)
 
         async def analyze(ticker):
             async with ticker_slots:
-                result = await coordinator.analyze(ticker, (evidence or {}).get(ticker, RiskEvidence()))
+                ticker_evidence = (evidence or {}).get(ticker, RiskEvidence())
+                result = await coordinator.analyze(ticker, ticker_evidence, on_event=on_event)
+            errors = dict(result.errors)
+            if history_path is not None:
+                try:
+                    await asyncio.to_thread(record_analysis, history_path, result, risk_evidence=ticker_evidence, limits=limits)
+                except Exception as error:
+                    errors['history'] = str(error)
             agents = []
             for name, status in result.agents.items():
                 decision = result.decisions.get(name)
-                agents.append(f"{name}: {decision.signal}" if decision else f"{name}: {status}")
-            return {"ticker": ticker, "agents": "; ".join(agents), "action": result.risk.action,
+                agents.append(format_agent(name, status, decision))
+            return {"ticker": ticker, "agents": "; ".join(agents), "evidence": result.evidence, "action": result.risk.action,
                     "risk": f"{result.risk.status}: {', '.join(result.risk.reasons)}",
-                    "errors": "; ".join(f"{name}: {message}" for name, message in result.errors.items())}
+                    "errors": "; ".join(f"{name}: {message}" for name, message in errors.items())}
 
         return await asyncio.gather(*(analyze(ticker) for ticker in tickers))
 
@@ -103,16 +131,23 @@ def dashboard(config) -> None:
     button = ui.button("Load prices", on_click=load)
     ui.separator()
     ui.label("Agent analysis").classes("text-h6")
-    analysis_status = ui.label("Requires a local D3 server at 127.0.0.1:8000.")
-    forecast_toggle = ui.checkbox("Include Timestral forecast (requires forecast extra)", value=False)
+    history_path = Path.home() / '.adam' / 'history.sqlite'
+    ui.label(f'Analyses and supplied risk inputs are saved locally to {history_path}.')
+    analysis_status = ui.label("Requires Ollama and the local d3:2b model. Run uv run adam-setup.")
+    forecast_toggle = ui.checkbox('Include Timestral forecast (requires forecast extra)', value=importlib.util.find_spec('timestral') is not None)
+    news_toggle = ui.checkbox('Include recent headline sentiment (requires sentiment extra)', value=False)
     risk_input = ui.textarea("Optional risk limits and per-ticker evidence (JSON)").classes("w-full")
+    ui.label('Analysis timeline')
+    timeline = ui.log(max_lines=200).classes('w-full h-40')
     analysis_table = ui.table(columns=[
         {"name": "ticker", "label": "Ticker", "field": "ticker"},
-        {"name": "agents", "label": "Agent signals", "field": "agents"},
+        {"name": "agents", "label": "Agent signals and model scores", "field": "agents"},
         {"name": "action", "label": "Risk-gated result", "field": "action"},
         {"name": "risk", "label": "Risk status", "field": "risk"},
         {"name": "errors", "label": "Errors", "field": "errors"},
     ], rows=[], row_key="ticker")
+
+    evidence_details = ui.column().classes('w-full')
 
     async def analyze():
         symbols = parse_tickers(tickers.value or "")
@@ -122,9 +157,19 @@ def dashboard(config) -> None:
         analyze_button.disable()
         analysis_status.text = "Analyzing..."
         analysis_table.rows = []
+        timeline.clear()
+        evidence_details.clear()
+
+        def show_event(event):
+            timeline.push(f"{event['time']} {event['ticker']} {event['stage']}: {event['status']}")
+
         try:
             limits, evidence = parse_risk_input(risk_input.value or "")
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value)
+            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value, news=news_toggle.value, on_event=show_event, history_path=history_path)
+            with evidence_details:
+                for row in analysis_table.rows:
+                    with ui.expansion(f"{row['ticker']} evidence").classes('w-full'):
+                        ui.code(json.dumps(row['evidence'], indent=2, ensure_ascii=False), language='json').classes('w-full')
             analysis_status.text = "Model scores are not probabilities of profit."
         except Exception as error:
             analysis_status.text = f"Analysis failed: {error}"
@@ -132,6 +177,43 @@ def dashboard(config) -> None:
             analyze_button.enable()
 
     analyze_button = ui.button("Analyze", on_click=analyze)
+    ui.separator()
+    ui.label('Saved analysis history').classes('text-h6')
+    history_status = ui.label()
+    history_table = ui.table(columns=[
+        {'name': 'time', 'label': 'Saved at (UTC)', 'field': 'time'},
+        {'name': 'ticker', 'label': 'Ticker', 'field': 'ticker'},
+        {'name': 'action', 'label': 'Risk-gated result', 'field': 'action'},
+        {'name': 'risk', 'label': 'Risk status', 'field': 'risk'},
+    ], rows=[], row_key='id')
+
+    saved_records = {}
+    history_details = ui.column().classes('w-full')
+
+    def select_history(event):
+        history_details.clear()
+        record = saved_records.get(event.value)
+        if record is not None:
+            with history_details:
+                ui.code(json.dumps(record, indent=2, ensure_ascii=False), language='json').classes('w-full')
+
+    history_selector = ui.select({}, label='View saved analysis', on_change=select_history).classes('w-full')
+
+    async def show_history():
+        try:
+            records = await asyncio.to_thread(read_history, history_path)
+            history_table.rows = [{'id': record['id'], 'time': record['created_at'], 'ticker': record['ticker'],
+                                   'action': record['risk']['action'], 'risk': record['risk']['status']}
+                                  for record in records]
+            saved_records.clear()
+            saved_records.update({str(record['id']): record for record in records})
+            history_selector.set_options({str(record['id']): f"{record['created_at']} — {record['ticker']}" for record in records}, value=None)
+            history_details.clear()
+            history_status.text = f'{len(records)} recent analyses'
+        except Exception as error:
+            history_status.text = f'Unable to read history: {error}'
+
+    ui.button('Load history', on_click=show_history)
 
 
 def run_dashboard(config) -> None:

@@ -9,8 +9,9 @@ from adam.d3 import D3Client
 class D3Tests(unittest.IsolatedAsyncioTestCase):
     async def test_structured_request_and_response(self):
         def handler(request):
-            self.assertEqual(request.url.path, "/v1/systemone")
+            self.assertEqual(str(request.url), "http://127.0.0.1:11434/v1/systemone")
             payload = json.loads(request.content)
+            self.assertEqual(payload["model"], "d3:2b")
             self.assertEqual(payload["questions"]["signal"]["type"], "choice")
             self.assertEqual(set(payload["questions"]["signal"]["criteria"]), {"BUY", "HOLD", "SELL"})
             return httpx.Response(200, json={"answers": {"signal": {"choice": "BUY", "probabilities": {"BUY": 0.7, "HOLD": 0.2, "SELL": 0.1}}}})
@@ -30,3 +31,8 @@ class D3Tests(unittest.IsolatedAsyncioTestCase):
     def test_rejects_remote_endpoint(self):
         with self.assertRaises(ValueError):
             D3Client(httpx.AsyncClient(), endpoint="https://example.com")
+
+    async def test_missing_local_model_has_setup_instructions(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(404, json={'error': "model 'd3:2b' not found"}))) as http:
+            with self.assertRaisesRegex(RuntimeError, 'adam-setup'):
+                await D3Client(http).assess('AAPL', 'market', {'price': 100})

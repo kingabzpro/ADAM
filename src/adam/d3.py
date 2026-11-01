@@ -4,9 +4,11 @@ import httpx
 
 from adam.decisions import Agent, Decision
 
+DEFAULT_MODEL = "d3:2b"
+
 
 class D3Client:
-    def __init__(self, http: httpx.AsyncClient, endpoint: str = "http://127.0.0.1:8000", model: str = "vllm-sr/d3-edge"):
+    def __init__(self, http: httpx.AsyncClient, endpoint: str = "http://127.0.0.1:11434", model: str = DEFAULT_MODEL):
         url = httpx.URL(endpoint)
         if url.scheme != "http" or url.host not in {"127.0.0.1", "::1"} or url.userinfo or url.query or url.fragment or url.path not in ("", "/"):
             raise ValueError("D3 endpoint must be a loopback HTTP origin")
@@ -27,6 +29,8 @@ class D3Client:
                 "criteria": {"BUY": "Evidence favors buying", "HOLD": "Evidence is mixed or neutral", "SELL": "Evidence favors selling"},
             }},
         }, follow_redirects=False)
+        if response.status_code == 404:
+            raise RuntimeError('Ollama model or decision endpoint unavailable; run uv run adam-setup and restart Ollama if needed')
         response.raise_for_status()
         try:
             answer = response.json()["answers"]["signal"]

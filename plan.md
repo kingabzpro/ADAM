@@ -4,7 +4,7 @@
 
 ADAM is a fully local, open-source AI-powered hedge fund research and decision-making platform that coordinates multiple specialized decision agents to analyze stocks, forecast prices, evaluate financial news, assess fundamentals, and generate consensus-based **Buy, Hold, or Sell** recommendations.
 
-Powered by **Yahoo Finance, Mistral Timestral, FinBERT, D3 via vLLM, and Python**, ADAM performs concurrent multi-stock analysis, streams AI decisions into an interactive dashboard, and applies a mandatory risk gate before issuing final recommendations.
+Powered by **Yahoo Finance, Mistral Timestral, FinBERT, D3 via Ollama, and Python**, ADAM performs concurrent multi-stock analysis, streams AI decisions into an interactive dashboard, and applies a mandatory risk gate before issuing final recommendations.
 
 **No paid AI APIs. No cloud inference. No unnecessary infrastructure.**
 
@@ -42,7 +42,7 @@ The initial focus is stock analysis and paper-trading research. Portfolio optimi
 | Forecasting | Mistral Timestral | Probabilistic stock-price forecasts |
 | Sentiment | FinBERT | Financial news sentiment |
 | Decision AI | D3 | Structured Buy/Hold/Sell assessments |
-| AI serving | vLLM | Local D3 inference and request batching |
+| AI serving | Ollama | Local D3 inference on Windows, macOS, and Linux |
 | News extraction | Trafilatura / Crawl4AI | Extract public financial news |
 | Technical analysis | NumPy / pandas | Indicators and market signals |
 | Backend | FastAPI | Local application API |
@@ -237,7 +237,7 @@ D3 model scores are not automatically calibrated probabilities of a profitable t
 
 - Keep one D3 model instance loaded.
 - Support multiple concurrent requests.
-- Use vLLM's batching capabilities.
+- Measure Ollama request concurrency and batching behavior.
 - Minimize repeated context.
 - Use compact structured evidence.
 - Compare multiple D3 model sizes for latency and decision quality.
@@ -476,7 +476,8 @@ The initial release will use **uv** rather than Docker Compose.
 git clone <repository-url>
 cd adam
 
-uv sync
+uv sync --extra forecast --extra sentiment
+uv run adam-setup
 uv run adam
 ```
 
@@ -493,7 +494,7 @@ The launcher should automatically:
 
 The user should never need to manually start several AI servers.
 
-D3/vLLM may use an isolated `uv` environment if CUDA or PyTorch dependency constraints require it, but the application supervisor should manage it automatically.
+Ollama runs locally on the host operating system. `uv run adam-setup` detects the platform, installs or updates Ollama if necessary, starts its local server, and downloads the configured D3 model.
 
 ### Future Docker support
 
@@ -600,21 +601,21 @@ adam/
 
 ### Phase 1 — Core Application
 
-- [ ] Initialize Python project with uv.
+- [x] Initialize Python project with uv.
 - [ ] Set up application configuration.
 - [ ] Create the startup supervisor.
-- [ ] Build NiceGUI dashboard shell.
-- [ ] Implement Yahoo Finance market collection.
-- [ ] Add multi-ticker requests.
-- [ ] Implement concurrent execution.
+- [x] Build NiceGUI dashboard shell.
+- [x] Implement Yahoo Finance market collection.
+- [x] Add multi-ticker requests.
+- [x] Implement concurrent execution.
 
 ### Phase 2 — Local AI Models
 
-- [ ] Integrate Timestral forecasting.
-- [ ] Integrate FinBERT sentiment.
-- [ ] Configure D3 with local vLLM.
-- [ ] Implement structured decision schemas.
-- [ ] Support multiple concurrent D3 requests.
+- [x] Integrate Timestral forecasting.
+- [x] Integrate FinBERT sentiment.
+- [x] Configure D3 with local Ollama.
+- [x] Implement structured decision schemas.
+- [x] Support multiple concurrent D3 requests.
 - [ ] Benchmark inference speed and memory usage.
 
 ### Phase 3 — Decision Agents
@@ -624,13 +625,13 @@ adam/
 - [ ] Implement news decision agent.
 - [ ] Implement technical decision agent.
 - [ ] Implement fundamental decision agent.
-- [ ] Add independent category-level assessments.
-- [ ] Add consensus voting.
+- [x] Add independent category-level assessments.
+- [x] Add consensus voting.
 
 ### Phase 4 — Risk & Transparency
 
-- [ ] Implement mandatory risk gate.
-- [ ] Add signal disagreement detection.
+- [x] Implement mandatory risk gate.
+- [x] Add signal disagreement detection.
 - [ ] Show decision scores and explanations.
 - [ ] Add article summaries and financial highlights.
 - [ ] Implement live event streaming.
@@ -662,6 +663,12 @@ adam/
 - [ ] Add offline operation.
 - [ ] Publish installation and development guides.
 - [ ] Add optional Docker Compose packaging.
+
+### Phase 8 — Release
+
+- [ ] Complete the full test suite and verify supported-platform checks.
+- [ ] Push verified changes to GitHub.
+- [ ] Create the GitHub release with accurate notes.
 
 ---
 

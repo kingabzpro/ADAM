@@ -18,6 +18,8 @@ dependencies = [
 
 [project.scripts]
 adam = "adam:main"
+adam-setup = "adam.setup:main"
+adam-benchmark = "adam.benchmark:main"
 
 [project.optional-dependencies]
 forecast = [
