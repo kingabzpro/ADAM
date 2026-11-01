@@ -16,6 +16,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "nicegui" },
+    { name = "pydantic" },
     { name = "pyyaml" },
     { name = "yfinance" },
 ]
@@ -23,6 +24,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "nicegui", specifier = ">=3.18.0" },
+    { name = "pydantic", specifier = ">=2.14.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "yfinance", specifier = ">=1.7.0" },
 ]
