@@ -20,6 +20,7 @@ dependencies = [
 adam = "adam:main"
 adam-setup = "adam.setup:main"
 adam-benchmark = "adam.benchmark:main"
+adam-calibrate = "adam.calibration:main"
 
 [project.optional-dependencies]
 forecast = [

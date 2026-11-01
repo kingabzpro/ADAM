@@ -661,7 +661,7 @@ adam/
 - [ ] Evaluate weighted versus majority voting.
   - Implemented comparison for caller-supplied point-in-time decisions and preselected weights; historical dataset and out-of-sample study remain outstanding.
 - [ ] Test risk-adjusted performance.
-  - Rolling forecast evaluation now measures direction and empirical quantile coverage; larger out-of-sample studies and decision-score calibration remain outstanding.
+  - Rolling forecast evaluation measures direction and empirical quantile coverage. A calibration command evaluates independently labeled D3 decisions; representative held-out datasets and larger studies remain outstanding.
 - [ ] Add decision history and performance tracking.
   - Saved analyses can be evaluated as independent hypothetical Buy outcomes over subsequent completed sessions; portfolio-level tracking remains outstanding.
 - [ ] Implement forward and paper-trading evaluation.
