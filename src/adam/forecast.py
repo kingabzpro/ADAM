@@ -1,4 +1,10 @@
+import threading
+
 import numpy as np
+
+_forecast_lock = threading.Lock()
+_model_lock = threading.Lock()
+_forecaster = None
 
 
 def load_forecaster(model: str = "mistralai/Timestral-5M", *, device: str = "cpu", local_files_only: bool = False):
@@ -7,12 +13,21 @@ def load_forecaster(model: str = "mistralai/Timestral-5M", *, device: str = "cpu
     return TimestralForecaster.from_pretrained(model, device=device, local_files_only=local_files_only)
 
 
+def shared_forecaster():
+    global _forecaster
+    with _model_lock:
+        if _forecaster is None:
+            _forecaster = load_forecaster()
+        return _forecaster
+
+
 def forecast_evidence(prices, horizon: int, forecaster) -> dict:
     values = np.array(prices, dtype=float, copy=True)
     if (values.ndim != 1 or values.size < 2 or not np.isfinite(values).all()
             or (values <= 0).any() or type(horizon) is not int or horizon < 1):
         raise ValueError("A positive price series and forecast horizon are required")
-    forecast = forecaster.forecast(values, prediction_length=horizon)
+    with _forecast_lock:
+        forecast = forecaster.forecast(values, prediction_length=horizon)
     arrays = [np.asarray(x, dtype=float).reshape(-1) for x in
               (forecast.quantile(0.1), forecast.median, forecast.quantile(0.9))]
     if any(a.size != horizon or not np.isfinite(a).all() for a in arrays):

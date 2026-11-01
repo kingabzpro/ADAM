@@ -67,3 +67,14 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
         calls = {call.args[0]: call.args[1] for call in coordinator.analyze.await_args_list}
         self.assertEqual(calls['AAPL'].volatility, 0.2)
         self.assertIsNone(calls['MSFT'].volatility)
+
+    async def test_forecaster_can_be_used_in_analysis(self):
+        from unittest.mock import AsyncMock, patch, sentinel
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskResult
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, errors={}, risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('risk_limits',)))
+        with patch('adam.dashboard.Coordinator', return_value=coordinator) as factory, patch('adam.dashboard.shared_forecaster', return_value=sentinel.forecaster):
+            await run_analysis(['AAPL'], 1, forecast=True)
+        self.assertIs(factory.call_args.kwargs['forecaster'], sentinel.forecaster)

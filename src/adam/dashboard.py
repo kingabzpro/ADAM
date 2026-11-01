@@ -6,6 +6,7 @@ from nicegui import ui
 
 from adam.coordinator import Coordinator
 from adam.d3 import D3Client
+from adam.forecast import shared_forecaster
 from adam.risk import RiskEvidence, RiskLimits
 
 from adam.market import fetch_many
@@ -51,9 +52,10 @@ def parse_risk_input(text: str):
         raise ValueError("Invalid risk configuration") from error
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None) -> list[dict]:
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None, *, forecast=False) -> list[dict]:
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        coordinator = Coordinator(D3Client(http), limits, inference_concurrency=inference_concurrency)
+        forecaster = await asyncio.to_thread(shared_forecaster) if forecast else None
+        coordinator = Coordinator(D3Client(http), limits, forecaster=forecaster, inference_concurrency=inference_concurrency)
         ticker_slots = asyncio.Semaphore(4)
 
         async def analyze(ticker):
@@ -102,6 +104,7 @@ def dashboard(config) -> None:
     ui.separator()
     ui.label("Agent analysis").classes("text-h6")
     analysis_status = ui.label("Requires a local D3 server at 127.0.0.1:8000.")
+    forecast_toggle = ui.checkbox("Include Timestral forecast (requires forecast extra)", value=False)
     risk_input = ui.textarea("Optional risk limits and per-ticker evidence (JSON)").classes("w-full")
     analysis_table = ui.table(columns=[
         {"name": "ticker", "label": "Ticker", "field": "ticker"},
@@ -121,7 +124,7 @@ def dashboard(config) -> None:
         analysis_table.rows = []
         try:
             limits, evidence = parse_risk_input(risk_input.value or "")
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence)
+            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence, forecast=forecast_toggle.value)
             analysis_status.text = "Model scores are not probabilities of profit."
         except Exception as error:
             analysis_status.text = f"Analysis failed: {error}"
