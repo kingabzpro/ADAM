@@ -1,11 +1,12 @@
 import asyncio
+import json
 
 import httpx
 from nicegui import ui
 
 from adam.coordinator import Coordinator
 from adam.d3 import D3Client
-from adam.risk import RiskEvidence
+from adam.risk import RiskEvidence, RiskLimits
 
 from adam.market import fetch_many
 
@@ -31,14 +32,33 @@ def market_rows(tickers, results):
     return rows
 
 
-async def run_analysis(tickers: list[str], inference_concurrency: int) -> list[dict]:
+def parse_risk_input(text: str):
+    if not text.strip():
+        return None, {}
+    try:
+        data = json.loads(text)
+        if not isinstance(data, dict) or set(data) != {"limits", "tickers"} or not isinstance(data["tickers"], dict):
+            raise ValueError("Expected limits and tickers objects")
+        limits = RiskLimits.model_validate(data["limits"])
+        evidence = {}
+        for ticker, values in data["tickers"].items():
+            normalized = ticker.strip().upper()
+            if not normalized or normalized in evidence:
+                raise ValueError("Ticker keys must be unique and nonempty")
+            evidence[normalized] = RiskEvidence.model_validate(values)
+        return limits, evidence
+    except (TypeError, KeyError) as error:
+        raise ValueError("Invalid risk configuration") from error
+
+
+async def run_analysis(tickers: list[str], inference_concurrency: int, limits=None, evidence=None) -> list[dict]:
     async with httpx.AsyncClient(timeout=30, trust_env=False) as http:
-        coordinator = Coordinator(D3Client(http), None, inference_concurrency=inference_concurrency)
+        coordinator = Coordinator(D3Client(http), limits, inference_concurrency=inference_concurrency)
         ticker_slots = asyncio.Semaphore(4)
 
         async def analyze(ticker):
             async with ticker_slots:
-                result = await coordinator.analyze(ticker, RiskEvidence())
+                result = await coordinator.analyze(ticker, (evidence or {}).get(ticker, RiskEvidence()))
             agents = []
             for name, status in result.agents.items():
                 decision = result.decisions.get(name)
@@ -82,6 +102,7 @@ def dashboard(config) -> None:
     ui.separator()
     ui.label("Agent analysis").classes("text-h6")
     analysis_status = ui.label("Requires a local D3 server at 127.0.0.1:8000.")
+    risk_input = ui.textarea("Optional risk limits and per-ticker evidence (JSON)").classes("w-full")
     analysis_table = ui.table(columns=[
         {"name": "ticker", "label": "Ticker", "field": "ticker"},
         {"name": "agents", "label": "Agent signals", "field": "agents"},
@@ -99,7 +120,8 @@ def dashboard(config) -> None:
         analysis_status.text = "Analyzing..."
         analysis_table.rows = []
         try:
-            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency)
+            limits, evidence = parse_risk_input(risk_input.value or "")
+            analysis_table.rows = await run_analysis(symbols, config.inference_concurrency, limits, evidence)
             analysis_status.text = "Model scores are not probabilities of profit."
         except Exception as error:
             analysis_status.text = f"Analysis failed: {error}"

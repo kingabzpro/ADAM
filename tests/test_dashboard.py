@@ -34,3 +34,36 @@ class AnalysisDisplayTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('news: unavailable', rows[0]['agents'])
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
         self.assertIn('risk_limits', rows[0]['risk'])
+
+class RiskInputTests(unittest.IsolatedAsyncioTestCase):
+    def test_parses_explicit_per_ticker_evidence(self):
+        import json
+        from adam.dashboard import parse_risk_input
+        from test_risk import LIMITS
+        data = {'limits': LIMITS.model_dump(), 'tickers': {'AAPL': {'volatility': 0.2}}}
+        limits, evidence = parse_risk_input(json.dumps(data))
+        self.assertEqual(limits.max_volatility, 0.5)
+        self.assertEqual(evidence['AAPL'].volatility, 0.2)
+        self.assertIsNone(evidence['AAPL'].market_time)
+
+    def test_rejects_malformed_risk_configuration(self):
+        from adam.dashboard import parse_risk_input
+        self.assertEqual(parse_risk_input(''), (None, {}))
+        for value in ('[]', '{"limits": {}, "tickers": {}}', '{"tickers": {}}'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_risk_input(value)
+
+    async def test_passes_each_tickers_own_risk_evidence(self):
+        from unittest.mock import AsyncMock, patch
+        from types import SimpleNamespace
+        from adam.dashboard import run_analysis
+        from adam.risk import RiskEvidence, RiskResult
+        from test_risk import LIMITS
+        coordinator = AsyncMock()
+        coordinator.analyze.return_value = SimpleNamespace(decisions={}, agents={}, errors={}, risk=RiskResult(status='insufficient_evidence', action='NO_TRADE', reasons=('volatility',)))
+        with patch('adam.dashboard.Coordinator', return_value=coordinator) as factory:
+            await run_analysis(['AAPL', 'MSFT'], 1, LIMITS, {'AAPL': RiskEvidence(volatility=0.2)})
+        self.assertEqual(factory.call_args.args[1], LIMITS)
+        calls = {call.args[0]: call.args[1] for call in coordinator.analyze.await_args_list}
+        self.assertEqual(calls['AAPL'].volatility, 0.2)
+        self.assertIsNone(calls['MSFT'].volatility)
