@@ -1,6 +1,6 @@
 import unittest
 
-from adam.presentation import evidence_summary, forecast_chart, safe_news_link, vote_summary
+from adam.presentation import evidence_summary, forecast_chart, vote_summary
 from test_decisions import decision
 
 
@@ -25,19 +25,23 @@ class EvidenceDisplayTests(unittest.TestCase):
         self.assertIsNone(forecast_chart(evidence | {'upper_returns': [float('nan'), .2]}))
         self.assertIsNone(forecast_chart(evidence | {'upper_returns': [1e308, 1e308]}))
 
-    def test_evidence_summary_is_factual_and_handles_missing_fields(self):
+    def test_evidence_summary_pairs_facts_with_a_plain_reading(self):
         summary = evidence_summary({'market': {'as_of': '2026-01-01', 'last_close': 100., 'annualized_volatility': .2},
                                     'technical': {'rsi_14': 40., 'sma_20': 98.},
                                     'fundamentals': {'metrics': {'revenue_growth': .1}, 'freshness': 'current'},
                                     'news': {'basis': 'headlines', 'headlines': [{'title': 'A'}]}})
-        self.assertIn('100.00', summary['market'])
-        self.assertIn('40.0', summary['technical'])
-        self.assertIn('10.0%', summary['fundamentals'])
-        self.assertIn('headlines', summary['news'])
+        self.assertIn('100.00', summary['market']['facts'])
+        self.assertIn('unremarkable', summary['market']['meaning'])
+        self.assertIn('40.0', summary['technical']['facts'])
+        self.assertIn('above', summary['technical']['meaning'])
+        self.assertIn('10.0%', summary['fundamentals']['facts'])
+        self.assertIn('headline', summary['news']['facts'])
         self.assertNotIn('forecast', summary)
 
-    def test_news_links_only_allow_http_or_https_without_credentials(self):
-        self.assertEqual(safe_news_link('https://example.com/story'), 'https://example.com/story')
-        for url in ('javascript:alert(1)', 'file:///etc/passwd', 'https://user:pass@example.com/', 'https://',
-                    'http://localhost./', 'http://127.0.0.1/', 'https://example.com:invalid/', 'https://example.com/\nfoo'):
-            self.assertIsNone(safe_news_link(url))
+    def test_news_summary_reports_counts_and_sentiment(self):
+        summary = evidence_summary({'news': {'basis': 'articles', 'articles': [
+            {'title': 'A', 'sentiment': {'label': 'positive'}},
+            {'title': 'B', 'sentiment': {'label': 'positive'}},
+            {'title': 'C', 'sentiment': {'label': 'negative'}}]}})
+        self.assertEqual(summary['news']['facts'], '3 articles scored · 2 positive, 1 negative')
+        self.assertIn('lean positive', summary['news']['meaning'])

@@ -39,7 +39,7 @@ class Consensus(BaseModel):
     abstained: tuple[Agent, ...]
 
 
-def consensus(decisions: list[Decision], weights: dict[Agent, float] | None = None, *, margin: float = 0.0) -> Consensus:
+def consensus(decisions: list[Decision], weights: dict[Agent, float] | None = None, *, margin: float = 0.075) -> Consensus:
     """Directional soft vote: weighted mean probabilities decide between BUY and SELL.
 
     Categorical HOLD votes no longer block the call; the consensus goes with whichever

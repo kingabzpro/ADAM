@@ -63,6 +63,7 @@ async def run_weekly_study(tickers, frames, fundamentals, spy, start, end, *,
                               inference_concurrency=inference_concurrency, data_concurrency=concurrency)
     slots = asyncio.Semaphore(concurrency)
     signals = {ticker: {} for ticker in tickers}
+    decisions = {ticker: {} for ticker in tickers}
     errors = {ticker: {} for ticker in tickers}
 
     async def analyze(ticker, week_end):
@@ -82,9 +83,35 @@ async def run_weekly_study(tickers, frames, fundamentals, spy, start, end, *,
                 signals[ticker][stamp] = 'NO_TRADE'
             else:
                 signals[ticker][stamp] = signal_at_week(outcome)
+                decisions[ticker][stamp] = list(outcome.decisions.values())
         voted = sum(1 for ticker in tickers if signals[ticker][week_end.date().isoformat()] != 'NO_TRADE')
         print(f'week {index + 1}/{len(weeks)} ({week_end.date()}): {voted}/{len(tickers)} votes', flush=True)
-    return {'weeks': [stamp.date().isoformat() for stamp in weeks], 'signals': signals, 'errors': errors}
+    return {'weeks': [stamp.date().isoformat() for stamp in weeks], 'signals': signals,
+            'decisions': decisions, 'errors': errors}
+
+
+def signals_for_margin(decisions_by_week, margin=0.0):
+    """Recompute each week's consensus signal at a directional margin."""
+    from adam.decisions import consensus
+    return {stamp: (consensus(list(week_decisions), margin=margin).signal or 'NO_TRADE')
+            for stamp, week_decisions in decisions_by_week.items()}
+
+
+def margin_sweep(decisions, tickers, frames, study, margins, *, cost_bps=0.0):
+    """Aggregate strategy behavior for each margin from one pipeline pass."""
+    rows = []
+    for margin in margins:
+        signals = {ticker: signals_for_margin(decisions[ticker], margin) for ticker in tickers}
+        summary = summarize(tickers, frames, {'weeks': study['weeks'], 'signals': signals,
+                                              'errors': study['errors']}, cost_bps=cost_bps)
+        counts = summary['pooled']['counts']
+        rows.append({'margin': margin,
+                     'strategy_return': summary['portfolio']['strategy']['total_return'],
+                     'buy_hold_return': summary['portfolio']['buy_hold']['total_return'],
+                     'buy_accuracy': summary['pooled']['accuracy']['BUY'],
+                     'sell_accuracy': summary['pooled']['accuracy']['SELL'],
+                     'buy_weeks': counts['BUY'], 'sell_weeks': counts['SELL'], 'hold_weeks': counts['HOLD']})
+    return rows
 
 
 def weekly_signal_series(frame, signals_by_date):
@@ -242,6 +269,15 @@ def markdown_report(summary, *, start, end, tickers, cost_bps):
         lines.append(f"| {ticker} | {pct(data['strategy']['total_return'])} "
                      f"| {pct(data['buy_hold']['total_return'])} | {pct(data['sma_rule']['total_return'])} "
                      f"| {pct(accuracy['BUY'])} | {pct(accuracy['SELL'])} | {error_count} |")
+    sweep = summary.get('sweep')
+    if sweep:
+        lines += ['', '## Margin sweep (one pipeline pass, consensus recomputed per margin)', '',
+                  '| Margin | Strategy return | BUY weeks | SELL weeks | HOLD weeks | BUY accuracy | SELL accuracy |',
+                  '|---|---|---|---|---|---|---|']
+        for row in sweep:
+            lines.append(f"| {row['margin']:g} | {pct(row['strategy_return'])} | {row['buy_weeks']} "
+                         f"| {row['sell_weeks']} | {row['hold_weeks']} | {pct(row['buy_accuracy'])} "
+                         f"| {pct(row['sell_accuracy'])} |")
     lines += ['', '## Caveats', '',
               '- Fundamentals are today\'s data applied to historical weeks (Yahoo has no point-in-time fundamentals), '
               'so the fundamentals agent carries lookahead bias.',
@@ -274,7 +310,7 @@ def fetch_study_data(tickers, start, end):
     return frames, fundamentals, frames['SPY']
 
 
-async def run_study(tickers, start, end, *, concurrency=4, cost_bps=5.0):
+async def run_study(tickers, start, end, *, concurrency=4, cost_bps=5.0, margin=0.0):
     import httpx
     from adam.d3 import D3Client
     from adam.forecast import shared_forecaster
@@ -285,7 +321,10 @@ async def run_study(tickers, start, end, *, concurrency=4, cost_bps=5.0):
                                        model=D3Client(http),
                                        forecaster=await asyncio.to_thread(shared_forecaster),
                                        concurrency=concurrency)
-    return summarize(tickers, frames, study, cost_bps=cost_bps)
+    summary = summarize(tickers, frames, study, cost_bps=cost_bps)
+    summary['sweep'] = margin_sweep(study['decisions'], tickers, frames, study,
+                                    (0.0, .025, .05, .075, .1, .15, .2), cost_bps=cost_bps)
+    return summary
 
 
 def main():
@@ -295,6 +334,8 @@ def main():
     parser.add_argument('--tickers', default=','.join(TOP_TICKERS))
     parser.add_argument('--concurrency', type=int, default=4)
     parser.add_argument('--cost-bps', type=float, default=5.0)
+    parser.add_argument('--margin', type=float, default=0.075,
+                        help='Minimum directional probability lean before acting (0 is fully decisive)')
     parser.add_argument('--out', help='Write the markdown report to this path')
     args = parser.parse_args()
     tickers = [ticker.strip().upper() for ticker in args.tickers.split(',') if ticker.strip()]
@@ -302,8 +343,8 @@ def main():
         print('No tickers given', file=sys.stderr)
         raise SystemExit(1)
     try:
-        summary = asyncio.run(run_study(tickers, args.start, args.end,
-                                        concurrency=args.concurrency, cost_bps=args.cost_bps))
+        summary = asyncio.run(run_study(tickers, args.start, args.end, concurrency=args.concurrency,
+                                        cost_bps=args.cost_bps, margin=args.margin))
     except (ValueError, OSError, RuntimeError) as error:
         print(f'Backtest failed: {error}', file=sys.stderr)
         raise SystemExit(1) from error
@@ -311,7 +352,7 @@ def main():
                       'strategy_return': summary['portfolio']['strategy']['total_return'],
                       'buy_hold_return': summary['portfolio']['buy_hold']['total_return'],
                       'sma_rule_return': summary['portfolio']['sma_rule']['total_return'],
-                      'pooled': summary['pooled']}))
+                      'pooled': summary['pooled'], 'margin_sweep': summary['sweep']}))
     if args.out:
         with open(args.out, 'w', encoding='utf-8') as file:
             file.write(markdown_report(summary, start=args.start, end=args.end,
