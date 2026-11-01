@@ -457,16 +457,16 @@
     });
   }
 
-  function setStage(ticker, stage, state, label, verdictClass) {
+  function setStage(ticker, stage, state, label, pillClass) {
     const row = document.getElementById('stage-' + ticker + '-' + stage);
     const seg = document.getElementById('seg-' + ticker + '-' + stage);
-    if (seg) seg.className = 'seg ' + (state === 'done' || state === 'failed' ? state : 'running');
+    if (seg) seg.className = 'seg ' + (state === 'done' || state === 'failed' ? state : state === 'running' ? 'running' : '');
     if (!row) return;
     const status = row.querySelector('.status');
-    if (state === 'done' && verdictClass) {
-      status.className = 'status done';
+    if ((state === 'done' || state === 'flat') && pillClass) {
+      status.className = 'status ' + (state === 'done' ? 'done' : '');
       const pill = document.createElement('span');
-      pill.className = 'verdict ' + verdictClass;
+      pill.className = 'verdict ' + pillClass;
       pill.textContent = label;
       status.innerHTML = '<span class="icon"></span>';
       status.appendChild(pill);
@@ -529,14 +529,14 @@
       if (stage === 'risk' && item.status !== 'started') {
         setStage(item.ticker, 'risk', item.status === 'failed' ? 'failed' : 'done', item.status, 'flat');
       } else if (STAGES.includes(stage)) {
-        setStage(item.ticker, stage, state, item.status);
+        setStage(item.ticker, stage, state, state === 'running' ? 'running' : item.status);
       }
     });
 
     source.addEventListener('result', (event) => {
       const payload = JSON.parse(event.data);
       Object.entries(payload.signals).forEach(([name, signal]) => {
-        if (signal.signal === null) setStage(payload.ticker, name, 'done', signal.status || 'unavailable');
+        if (signal.signal === null) setStage(payload.ticker, name, 'flat', signal.status || 'unavailable', 'flat');
         else setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
                       verdictClass(signal.signal));
       });
