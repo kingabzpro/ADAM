@@ -651,6 +651,7 @@ adam/
 
 - [ ] Implement historical backtesting.
 - [ ] Compare rule-based and AI-based decisions.
+  - Added a trailing moving-average baseline against risk-gated model consensus; an out-of-sample study with recorded historical AI decisions remains outstanding.
 - [ ] Evaluate weighted versus majority voting.
   - Implemented comparison for caller-supplied point-in-time decisions and preselected weights; historical dataset and out-of-sample study remain outstanding.
 - [ ] Test risk-adjusted performance.

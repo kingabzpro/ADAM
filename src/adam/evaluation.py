@@ -4,6 +4,38 @@ import pandas as pd
 from adam.forecast import forecast_evidence
 
 
+def compare_rule_baseline(prices, decisions, evidence, limits, *, window=20, initial_cash=10000.0, cost_bps=0.0):
+    """Compare consensus to a trailing moving-average rule on the same sessions.
+
+    Inputs must be point-in-time; historical provenance is the caller's
+    responsibility. Both methods use the same risk evidence and execution model.
+    """
+    from adam.backtest import backtest
+    from adam.decisions import Consensus
+    from adam.risk import evaluate_risk
+
+    if type(window) is not int or not 2 <= window <= len(prices):
+        raise ValueError('Window must cover at least two available sessions')
+    model = compare_voting(prices, decisions, evidence, limits,
+                           weights={agent: 1 for agent in ('market', 'forecast', 'news', 'technical', 'fundamentals')},
+                           initial_cash=initial_cash, cost_bps=cost_bps)['majority']
+    closes = pd.to_numeric(prices['Close'], errors='raise').astype(float)
+    averages = closes.rolling(window).mean()
+    signals = []
+    for i, (when, inputs) in enumerate(zip(prices.index, evidence, strict=True)):
+        if i < window - 1:
+            signals.append('NO_TRADE')
+            model['signals'][i] = 'NO_TRADE'
+            continue
+        signal = 'BUY' if closes.iloc[i] > averages.iloc[i] else 'SELL' if closes.iloc[i] < averages.iloc[i] else 'HOLD'
+        vote = Consensus(signal=signal, counts={signal: 1}, disagreement=False, abstained=())
+        signals.append(evaluate_risk(vote, inputs, limits, now=when.to_pydatetime()).action)
+    fractions = [item.position_fraction or 0 for item in evidence]
+    options = {'initial_cash': initial_cash, 'cost_bps': cost_bps, 'position_fractions': fractions}
+    model['backtest'] = backtest(prices, model['signals'], **options)
+    return {'model': model, 'rule': {'signals': signals, 'backtest': backtest(prices, signals, **options)}}
+
+
 def compare_voting(prices, decisions, evidence, limits, *, weights, initial_cash=10000.0, cost_bps=0.0):
     """Compare precomputed point-in-time votes; timestamps denote signal times.
 
