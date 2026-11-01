@@ -180,7 +180,6 @@ class RiskInputTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(path == '/v1/systemone' for path in calls))
         self.assertIn('market: BUY', rows[0]['agents'])
         self.assertEqual(rows[0]['action'], 'NO_TRADE')
-        self.assertEqual(rows[0]['signals']['market']['probabilities'], {'BUY': 0.7, 'HOLD': 0.2, 'SELL': 0.1})
         self.assertEqual(rows[0]['signals']['market']['confidence'], 0.7)
 
     async def test_news_uses_one_shared_client_per_run(self):

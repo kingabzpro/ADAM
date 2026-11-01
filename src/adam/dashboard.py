@@ -68,13 +68,11 @@ def agent_signals(result) -> dict:
     for name, status in result.agents.items():
         decision = result.decisions.get(name)
         if decision is None:
-            signals[name] = {'signal': None, 'confidence': None, 'abstained': True, 'status': status,
-                             'probabilities': None}
+            signals[name] = {'signal': None, 'confidence': None, 'abstained': True, 'status': status}
         else:
             signals[name] = {'signal': decision.signal, 'confidence': max(decision.probabilities.values()),
                              'abstained': not decision.reliable or decision.stale or decision.status != "completed",
-                             'status': status,
-                             'probabilities': {name: decision.probabilities[name] for name in ('BUY', 'HOLD', 'SELL')}}
+                             'status': status}
     return signals
 
 

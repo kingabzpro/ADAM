@@ -1,4 +1,5 @@
 """Human-readable summaries of supplied evidence, not model explanations."""
+from datetime import datetime
 from ipaddress import ip_address
 from math import isfinite
 from urllib.parse import urlsplit
@@ -14,6 +15,15 @@ def vote_summary(decisions):
 
 def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+
+def _session_date(value):
+    """Format an ISO timestamp as a readable calendar date, or None when unparsable."""
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return f'{parsed:%b} {parsed.day}, {parsed.year}'
 
 
 def forecast_chart(evidence):
@@ -37,26 +47,31 @@ def evidence_summary(evidence):
     result = {}
     market = evidence.get('market', {})
     if _number(market.get('last_close')):
-        text = f"Close {market['last_close']:.2f}; as of {market.get('as_of', 'unknown')}."
+        text = f"Last close ${market['last_close']:,.2f}"
+        date = _session_date(market.get('as_of'))
+        if date:
+            text += f' on {date}'
         if _number(market.get('annualized_volatility')):
-            text += f" Annualized volatility {market['annualized_volatility']:.1%}."
+            text += f" · annualized volatility {market['annualized_volatility']:.1%}"
         result['market'] = text
     technical = evidence.get('technical', {})
     fields = []
     if _number(technical.get('rsi_14')):
         fields.append(f"RSI(14) {technical['rsi_14']:.1f}")
     if _number(technical.get('sma_20')):
-        fields.append(f"20-session average {technical['sma_20']:.2f}")
+        fields.append(f"20-session average ${technical['sma_20']:,.2f}")
     if fields:
-        result['technical'] = '; '.join(fields) + '.'
+        result['technical'] = ' · '.join(fields)
     fundamentals = evidence.get('fundamentals', {})
     growth = fundamentals.get('metrics', {}).get('revenue_growth')
     if _number(growth):
-        result['fundamentals'] = f"Revenue growth {growth:.1%}; fiscal data freshness: {fundamentals.get('freshness', 'unknown')}."
+        freshness = {'current': 'fiscal data is current', 'stale': 'fiscal data is stale'}.get(
+            fundamentals.get('freshness'), 'fiscal quarter date is unknown')
+        result['fundamentals'] = f'Revenue growth {growth:+.1%} · {freshness}'
     news = evidence.get('news', {})
     if news.get('basis') in ('articles', 'headlines'):
         basis = news['basis']
-        result['news'] = f"{len(news.get(basis, []))} {basis} scored; coverage and relevance are limited."
+        result['news'] = f"{len(news.get(basis, []))} {basis} scored · coverage and relevance are limited"
     return result
 
 

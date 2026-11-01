@@ -185,7 +185,6 @@
   .status.done { color: #67d992; }
   .status.done .icon { background: var(--buy); }
   .status.failed { color: var(--danger); }
-  .stage-probs { flex-basis: 100%; font-size: 10.5px; color: var(--muted); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
   .status.failed .icon { background: var(--sell); }
   .verdict {
     display: inline-flex; align-items: center; justify-content: center; min-width: 62px;
@@ -561,21 +560,8 @@
       const payload = JSON.parse(event.data);
       Object.entries(payload.signals).forEach(([name, signal]) => {
         if (signal.signal === null) setStage(payload.ticker, name, 'flat', signal.status || 'unavailable', 'flat');
-        else {
-          setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
-                   verdictClass(signal.signal));
-          const probs = signal.probabilities;
-          if (probs) {
-            const row = document.getElementById('stage-' + payload.ticker + '-' + name);
-            if (row) {
-              const line = document.createElement('div');
-              line.className = 'stage-probs';
-              line.textContent = ['BUY', 'HOLD', 'SELL'].map((choice) =>
-                choice + ' ' + Math.round((probs[choice] || 0) * 100) + '%').join('   ');
-              row.appendChild(line);
-            }
-          }
-        }
+        else setStage(payload.ticker, name, 'done', signal.signal + ' ' + Math.round(signal.confidence * 100) + '%',
+                      verdictClass(signal.signal));
       });
       resultsSection.classList.remove('hidden');
       resultsList.appendChild(resultCard(payload));
@@ -709,11 +695,12 @@
       const median = (forecast.median_returns || [])[index], lower = (forecast.lower_returns || [])[index],
             upper = (forecast.upper_returns || [])[index];
       if ([median, lower, upper].some((value) => typeof value !== 'number' || !isFinite(value))) return null;
-      return horizon + 'd ' + percent(median) + ' [' + percent(lower) + ', ' + percent(upper) + ']';
-    }).filter(Boolean).join(' · ');
+      return 'After ' + horizon + ' session' + (horizon === 1 ? '' : 's') + ': median ' + percent(median) +
+             ', likely range ' + percent(lower) + ' to ' + percent(upper);
+    }).filter(Boolean).join('  ·  ');
   }
 
-  function percent(value) { return (value * 100).toFixed(1) + '%'; }
+  function percent(value) { return (value > 0 ? '+' : '') + (value * 100).toFixed(1) + '%'; }
 </script>
 </body>
 </html>
