@@ -132,11 +132,29 @@ def evaluate_forecast(prices, forecaster, *, initial_window: int, horizon: int =
         predicted = float(context[-1] * (1 + forecast['median_returns'][-1]))
         predictions.append({'origin_index': end - 1, 'target_index': end + horizon - 1,
                             'actual': float(values[end + horizon - 1]),
-                            'model': predicted, 'naive': float(context[-1])})
+                            'model': predicted, 'naive': float(context[-1]),
+                            'lower': float(context[-1] * (1 + forecast['lower_returns'][-1])),
+                            'upper': float(context[-1] * (1 + forecast['upper_returns'][-1]))})
     model_errors = np.array([row['model'] - row['actual'] for row in predictions])
     naive_errors = np.array([row['naive'] - row['actual'] for row in predictions])
+    actual = np.array([row['actual'] for row in predictions])
+    origin = np.array([row['naive'] for row in predictions])
+    model = np.array([row['model'] for row in predictions])
+    lower = np.array([row['lower'] for row in predictions])
+    upper = np.array([row['upper'] for row in predictions])
+    eps = np.finfo(float).eps * 4
+    tolerance = eps * np.abs(origin) + eps * np.abs(actual) + eps * np.abs(lower) + eps * np.abs(upper)
+    directional = actual != origin
+    directional_samples = int(directional.sum())
     return {'horizon': horizon, 'samples': len(predictions), 'predictions': predictions,
             'model_mae': float(np.mean(np.abs(model_errors))),
             'naive_mae': float(np.mean(np.abs(naive_errors))),
             'model_rmse': float(np.sqrt(np.mean(model_errors ** 2))),
-            'naive_rmse': float(np.sqrt(np.mean(naive_errors ** 2)))}
+            'naive_rmse': float(np.sqrt(np.mean(naive_errors ** 2))),
+            'directional_samples': directional_samples,
+            'directional_accuracy': float(np.mean(np.sign(model[directional] - origin[directional])
+                                                   == np.sign(actual[directional] - origin[directional]))) if directional_samples else None,
+            'lower_quantile_coverage': float(np.mean(actual <= lower + tolerance)),
+            'upper_quantile_coverage': float(np.mean(actual <= upper + tolerance)),
+            'interval_coverage': float(np.mean((actual >= lower - tolerance) & (actual <= upper + tolerance))),
+            'mean_interval_width': float(np.mean(upper - lower))}
