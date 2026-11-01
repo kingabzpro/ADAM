@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 from dataclasses import dataclass
 
@@ -32,6 +33,17 @@ class Coordinator:
         self.news_provider = news_provider
         self.inference_slots = asyncio.Semaphore(inference_concurrency)
         self.forecast_slot = asyncio.Semaphore(1)
+        self._benchmark_task = None
+        self._benchmark_started = 0.0
+
+    async def benchmark_history(self):
+        task = self._benchmark_task
+        if (task is None or (task.done() and (task.cancelled() or task.exception() is not None
+                                               or time.monotonic() - self._benchmark_started > 60))):
+            self._benchmark_started = time.monotonic()
+            task = asyncio.create_task(asyncio.to_thread(fetch_history, 'SPY', '3mo'))
+            self._benchmark_task = task
+        return await asyncio.shield(task)
 
     async def analyze(self, ticker: str, risk_evidence: RiskEvidence, *, horizon: int = 5, on_event=None) -> AnalysisResult:
         ticker = ticker.strip().upper()
@@ -97,7 +109,7 @@ class Coordinator:
                 evidence = await asyncio.to_thread(market_evidence, history)
                 emit('benchmark', 'started')
                 try:
-                    benchmark = history if ticker == 'SPY' else await asyncio.to_thread(fetch_history, 'SPY', '3mo')
+                    benchmark = history if ticker == 'SPY' else await self.benchmark_history()
                     evidence['comparison'] = await asyncio.to_thread(compare_market, history, benchmark)
                     evidence['comparison_status'] = 'available'
                     emit('benchmark', 'completed')

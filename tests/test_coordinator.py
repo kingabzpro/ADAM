@@ -172,3 +172,31 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.decisions['market'].reliable)
         self.assertEqual(result.risk.action, 'NO_TRADE')
         self.assertIn('market_decision', result.risk.reasons)
+
+    async def test_concurrent_tickers_share_one_benchmark_download(self):
+        import asyncio
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent).model_copy(update={'ticker': ticker})
+        frame = history([100.] * 40)
+        coordinator = Coordinator(model, None, inference_concurrency=2)
+        with patch('adam.coordinator.fetch_history', return_value=frame) as fetch:
+            results = await asyncio.gather(coordinator.analyze('AAPL', RiskEvidence()), coordinator.analyze('MSFT', RiskEvidence()))
+        self.assertEqual(sum(call.args[0] == 'SPY' for call in fetch.call_args_list), 1)
+        self.assertEqual([result.agents['market'] for result in results], ['completed', 'completed'])
+
+    async def test_benchmark_cache_expires_and_failed_requests_retry(self):
+        frame = history([100.] * 40)
+        coordinator = Coordinator(AsyncMock(), None)
+        with patch('adam.coordinator.fetch_history', return_value=frame) as fetch:
+            self.assertIs(await coordinator.benchmark_history(), frame)
+            self.assertIs(await coordinator.benchmark_history(), frame)
+            self.assertEqual(fetch.call_count, 1)
+            coordinator._benchmark_started -= 61
+            self.assertIs(await coordinator.benchmark_history(), frame)
+            self.assertEqual(fetch.call_count, 2)
+        coordinator = Coordinator(AsyncMock(), None)
+        with patch('adam.coordinator.fetch_history', side_effect=[RuntimeError('offline'), frame]) as fetch:
+            with self.assertRaises(RuntimeError):
+                await coordinator.benchmark_history()
+            self.assertIs(await coordinator.benchmark_history(), frame)
+            self.assertEqual(fetch.call_count, 2)
