@@ -111,3 +111,21 @@ class CoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 result = await Coordinator(AsyncMock(), None).analyze('AAPL', RiskEvidence(), on_event=broken)
         self.assertEqual(result.risk.action, 'NO_TRADE')
         self.assertEqual(result.timeline[-1]['stage'], 'risk')
+
+    async def test_news_provider_contributes_one_category_vote(self):
+        model = AsyncMock()
+        model.assess.side_effect = lambda ticker, agent, evidence: decision(agent)
+        provider = AsyncMock(return_value={'basis': 'headlines', 'headlines': [{'title': 'news'}], 'mean_scores': {'positive': 1}})
+        with patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, None, news_provider=provider).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['news'], 'completed')
+        self.assertEqual(result.decisions['news'].agent, 'news')
+        self.assertEqual(result.risk.action, 'NO_TRADE')
+
+    async def test_empty_news_abstains(self):
+        model = AsyncMock()
+        provider = AsyncMock(return_value={'basis': 'headlines', 'headlines': [], 'mean_scores': None})
+        with patch('adam.coordinator.fetch_history', side_effect=RuntimeError('offline')):
+            result = await Coordinator(model, None, news_provider=provider).analyze('AAPL', RiskEvidence())
+        self.assertEqual(result.agents['news'], 'failed')
+        model.assess.assert_not_awaited()

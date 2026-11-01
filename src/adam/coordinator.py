@@ -22,12 +22,13 @@ class AnalysisResult:
 
 
 class Coordinator:
-    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, inference_concurrency: int = 1):
+    def __init__(self, model, limits: RiskLimits | None, *, forecaster=None, news_provider=None, inference_concurrency: int = 1):
         if type(inference_concurrency) is not int or inference_concurrency < 1:
             raise ValueError("inference_concurrency must be a positive integer")
         self.model = model
         self.limits = limits
         self.forecaster = forecaster
+        self.news_provider = news_provider
         self.inference_slots = asyncio.Semaphore(inference_concurrency)
         self.forecast_slot = asyncio.Semaphore(1)
 
@@ -102,7 +103,16 @@ class Coordinator:
                 tasks.append(run("forecast", forecast))
             await asyncio.gather(*tasks)
 
-        await asyncio.gather(market_stream(), run("fundamentals", fundamentals))
+        async def news():
+            evidence = await self.news_provider(ticker)
+            if not evidence.get('headlines') or evidence.get('mean_scores') is None:
+                raise ValueError('No recent headlines available')
+            return evidence
+
+        tasks = [market_stream(), run("fundamentals", fundamentals)]
+        if self.news_provider is not None:
+            tasks.append(run('news', news))
+        await asyncio.gather(*tasks)
         result = (evaluate_risk(consensus(list(decisions.values())), risk_evidence, self.limits)
                   if self.limits is not None else RiskResult(status="insufficient_evidence", action="NO_TRADE", reasons=("risk_limits",)))
         missing_critical = tuple(f"{name}_decision" for name in ("market", "forecast")
