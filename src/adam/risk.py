@@ -48,6 +48,12 @@ class RiskResult(BaseModel):
     reasons: tuple[str, ...]
 
 
+# Checks that only make sense with a managed portfolio. With no portfolio
+# supplied at all they are skipped; supplying any of them requires all of them.
+PORTFOLIO_CHECKS = ("position_fraction", "concentration", "correlated_exposure",
+                    "reward_risk", "transaction_cost_fraction", "loss_fraction")
+
+
 def derive_risk_evidence(supplied: RiskEvidence, market: dict | None, forecast: dict | None) -> RiskEvidence:
     """Combine observed data with user inputs using the more conservative value."""
     values = supplied.model_dump()
@@ -83,7 +89,9 @@ def evaluate_risk(vote: Consensus, evidence: RiskEvidence, limits: RiskLimits, *
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
-    missing = [name for name in RiskEvidence.model_fields if getattr(evidence, name) is None]
+    missing = [name for name in RiskEvidence.model_fields if getattr(evidence, name) is None
+               and (name not in PORTFOLIO_CHECKS or any(getattr(evidence, other) is not None
+                                                        for other in PORTFOLIO_CHECKS))]
     if vote.signal is None:
         missing.append("consensus")
     failures = []

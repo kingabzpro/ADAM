@@ -87,3 +87,15 @@ class RiskTests(unittest.TestCase):
         self.assertEqual((result.status, result.action), ("insufficient_evidence", "NO_TRADE"))
         result = decide([decision("market")], RiskEvidence(**EVIDENCE), LIMITS, now=NOW)
         self.assertEqual((result.status, result.action), ("pass", "BUY"))
+
+    def test_without_portfolio_only_market_checks_apply(self):
+        market_only = RiskEvidence(market_time=NOW, volatility=0.2, downside=0.1, daily_dollar_volume=2000000)
+        self.assertEqual(self.evaluate(market_only).action, "BUY")
+        result = self.evaluate(market_only, [decision("market"), decision("news", "SELL")])
+        self.assertEqual((result.status, result.action), ("warning", "HOLD"))
+        stale = market_only.model_copy(update={"market_time": NOW - timedelta(seconds=3601)})
+        self.assertEqual(self.evaluate(stale).status, "fail")
+        partial = market_only.model_copy(update={"position_fraction": 0.05})
+        result = self.evaluate(partial)
+        self.assertEqual((result.status, result.action), ("insufficient_evidence", "NO_TRADE"))
+        self.assertIn("concentration", result.reasons)
